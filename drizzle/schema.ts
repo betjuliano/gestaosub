@@ -83,6 +83,7 @@ export const submissoes = mysqlTable("submissoes", {
   periodicoId: varchar("periodicoId", { length: 64 }).notNull(),
   periodicoSecundarioId: varchar("periodicoSecundarioId", { length: 64 }),
   submissaoOriginalId: varchar("submissaoOriginalId", { length: 64 }),
+  dataPrazo: timestamp("dataPrazo"),
   createdAt: timestamp("createdAt").defaultNow(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow(),
 }, (table) => ({
@@ -119,6 +120,7 @@ export type InsertAutor = typeof autores.$inferInsert;
 export const revisoes = mysqlTable("revisoes", {
   id: varchar("id", { length: 64 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
   dataRecebimento: timestamp("dataRecebimento").notNull(),
+  dataPrazo: timestamp("dataPrazo"),
   numeroRevisores: int("numeroRevisores").notNull(),
   // Campos separados para cada revisor
   solicitacaoRevisor1: text("solicitacaoRevisor1"),

@@ -1,4 +1,5 @@
-import { eq, desc, like, or, sql, and, count } from "drizzle-orm";
+import { eq, desc, like, or, sql, and, count, lt, gte } from "drizzle-orm";
+import bcrypt from "bcryptjs";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertUser,
@@ -136,15 +137,21 @@ export async function loginUser(email: string, senha: string) {
     let admin = await getUserByEmail(email);
     if (!admin) {
       const adminId = crypto.randomUUID();
+      const hashedPassword = await bcrypt.hash("Adm4125", 10);
       await db.insert(users).values({
         id: adminId,
         name: "Administrador",
         email: email,
-        senha: senha,
+        senha: hashedPassword,
         role: "admin",
         loginMethod: "password",
       });
       admin = await getUserByEmail(email);
+    }
+    // Verificar senha com bcrypt
+    if (admin && admin.senha) {
+      const isValid = await bcrypt.compare(senha, admin.senha);
+      if (!isValid) return null;
     }
     return admin || null;
   }
@@ -159,7 +166,11 @@ export async function loginUser(email: string, senha: string) {
   if (result.length === 0) return null;
 
   const user = result[0];
-  if (user.senha !== senha) return null;
+  if (!user.senha) return null;
+  
+  // Verificar senha com bcrypt
+  const isValid = await bcrypt.compare(senha, user.senha);
+  if (!isValid) return null;
 
   return user;
 }
@@ -178,11 +189,14 @@ export async function createUser(data: {
 
   const userId = crypto.randomUUID();
   
+  // Criptografar senha com bcrypt
+  const hashedPassword = await bcrypt.hash(data.senha, 10);
+  
   await db.insert(users).values({
     id: userId,
     name: data.nome,
     email: data.email,
-    senha: data.senha,
+    senha: hashedPassword,
     universidade: data.universidade,
     areaFormacao: data.areaFormacao,
     nivelFormacao: data.nivelFormacao as any,
@@ -430,6 +444,106 @@ export async function updateSubmissaoStatus(
     status,
     observacao,
   });
+}
+
+export async function getAlertasPrazo(usuarioId?: string) {
+  const db = await getDb();
+  if (!db) return { submissoes: [], revisoes: [] };
+
+  const hoje = new Date();
+  const seteDiasDepois = new Date();
+  seteDiasDepois.setDate(hoje.getDate() + 7);
+
+  // Submissões próximas do prazo (próximos 7 dias)
+  let submissoesQuery = db
+    .select({
+      submissao: submissoes,
+      periodico: periodicos,
+      criador: users,
+    })
+    .from(submissoes)
+    .leftJoin(periodicos, eq(submissoes.periodicoId, periodicos.id))
+    .leftJoin(users, eq(submissoes.criadorId, users.id))
+    .where(
+      and(
+        sql`${submissoes.dataPrazo} IS NOT NULL`,
+        gte(submissoes.dataPrazo, hoje),
+        lt(submissoes.dataPrazo, seteDiasDepois)
+      )
+    )
+    .orderBy(submissoes.dataPrazo);
+
+  // Se não for admin, filtrar por usuário
+  if (usuarioId) {
+    submissoesQuery = db
+      .select({
+        submissao: submissoes,
+        periodico: periodicos,
+        criador: users,
+      })
+      .from(submissoes)
+      .leftJoin(periodicos, eq(submissoes.periodicoId, periodicos.id))
+      .leftJoin(users, eq(submissoes.criadorId, users.id))
+      .where(
+        and(
+          eq(submissoes.criadorId, usuarioId),
+          sql`${submissoes.dataPrazo} IS NOT NULL`,
+          gte(submissoes.dataPrazo, hoje),
+          lt(submissoes.dataPrazo, seteDiasDepois)
+        )
+      )
+      .orderBy(submissoes.dataPrazo);
+  }
+
+  const submissoesResult = await submissoesQuery;
+
+  // Revisões próximas do prazo (próximos 7 dias)
+  let revisoesQuery = db
+    .select({
+      revisao: revisoes,
+      submissao: submissoes,
+      periodico: periodicos,
+    })
+    .from(revisoes)
+    .leftJoin(submissoes, eq(revisoes.submissaoId, submissoes.id))
+    .leftJoin(periodicos, eq(submissoes.periodicoId, periodicos.id))
+    .where(
+      and(
+        sql`${revisoes.dataPrazo} IS NOT NULL`,
+        gte(revisoes.dataPrazo, hoje),
+        lt(revisoes.dataPrazo, seteDiasDepois)
+      )
+    )
+    .orderBy(revisoes.dataPrazo);
+
+  // Se não for admin, filtrar por usuário
+  if (usuarioId) {
+    revisoesQuery = db
+      .select({
+        revisao: revisoes,
+        submissao: submissoes,
+        periodico: periodicos,
+      })
+      .from(revisoes)
+      .leftJoin(submissoes, eq(revisoes.submissaoId, submissoes.id))
+      .leftJoin(periodicos, eq(submissoes.periodicoId, periodicos.id))
+      .where(
+        and(
+          eq(submissoes.criadorId, usuarioId),
+          sql`${revisoes.dataPrazo} IS NOT NULL`,
+          gte(revisoes.dataPrazo, hoje),
+          lt(revisoes.dataPrazo, seteDiasDepois)
+        )
+      )
+      .orderBy(revisoes.dataPrazo);
+  }
+
+  const revisoesResult = await revisoesQuery;
+
+  return {
+    submissoes: submissoesResult,
+    revisoes: revisoesResult,
+  };
 }
 
 // ============= AUTORES =============

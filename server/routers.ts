@@ -275,6 +275,15 @@ export const appRouter = router({
       }),
   }),
 
+  // ============= ALERTAS DE PRAZO =============
+  alertas: router({
+    list: protectedProcedure.query(async ({ ctx }) => {
+      // Admin vê todos, usuário vê apenas os seus
+      const usuarioId = ctx.user.role === "admin" ? undefined : ctx.user.id;
+      return await db.getAlertasPrazo(usuarioId);
+    }),
+  }),
+
   // ============= REVISÕES =============
   revisoes: router({
     list: publicProcedure.query(async () => {
