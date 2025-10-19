@@ -9,6 +9,7 @@ import SubmissaoDetalhes from "./pages/SubmissaoDetalhes";
 import Periodicos from "./pages/Periodicos";
 import PeriodicoDetalhes from "./pages/PeriodicoDetalhes";
 import Revisoes from "./pages/Revisoes";
+import Configuracoes from "./pages/Configuracoes";
 
 function Router() {
   return (
@@ -18,6 +19,7 @@ function Router() {
       <Route path={"/periodicos"} component={Periodicos} />
       <Route path={"/periodicos/:id"} component={PeriodicoDetalhes} />
       <Route path={"/revisoes"} component={Revisoes} />
+      <Route path={"/configuracoes"} component={Configuracoes} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />
     </Switch>

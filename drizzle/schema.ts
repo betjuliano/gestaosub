@@ -1,4 +1,4 @@
-import { mysqlEnum, mysqlTable, text, timestamp, varchar, int, index } from "drizzle-orm/mysql-core";
+import { mysqlEnum, mysqlTable, text, timestamp, varchar, int, index, boolean } from "drizzle-orm/mysql-core";
 import { relations } from "drizzle-orm";
 
 /**
@@ -10,6 +10,12 @@ export const users = mysqlTable("users", {
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  // Novos campos de perfil
+  universidade: varchar("universidade", { length: 300 }),
+  areaFormacao: varchar("areaFormacao", { length: 200 }),
+  nivelFormacao: mysqlEnum("nivelFormacao", ["graduacao", "mestrado", "doutorado", "pos_doutorado"]),
+  universidadeOrigem: varchar("universidadeOrigem", { length: 300 }),
+  telefone: varchar("telefone", { length: 20 }),
   createdAt: timestamp("createdAt").defaultNow(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow(),
 }, (table) => ({
@@ -25,16 +31,24 @@ export type InsertUser = typeof users.$inferInsert;
 export const periodicos = mysqlTable("periodicos", {
   id: varchar("id", { length: 64 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
   nome: varchar("nome", { length: 500 }).notNull(),
-  issn: varchar("issn", { length: 20 }),
+  issn: varchar("issn", { length: 20 }).notNull(),
   area: varchar("area", { length: 200 }),
-  qualis: varchar("qualis", { length: 10 }),
-  descricao: text("descricao"),
+  // Classificações
   abdc: varchar("abdc", { length: 10 }),
   abs: varchar("abs", { length: 10 }),
-  sjrQuartile: varchar("sjrQuartile", { length: 10 }),
-  sjrScore: varchar("sjrScore", { length: 20 }),
-  jcrQuartile: varchar("jcrQuartile", { length: 10 }),
-  jcrImpactFactor: varchar("jcrImpactFactor", { length: 20 }),
+  sjr: varchar("sjr", { length: 20 }),
+  jcr: varchar("jcr", { length: 20 }),
+  citeScore: varchar("citeScore", { length: 20 }),
+  fatorImpacto: varchar("fatorImpacto", { length: 20 }),
+  qualis: mysqlEnum("qualis", ["muito_bom", "bom", "fraco", "sem_classificacao"]),
+  spell: varchar("spell", { length: 10 }),
+  scielo: varchar("scielo", { length: 10 }),
+  hIndex: varchar("hIndex", { length: 20 }),
+  // Formatação
+  numeroPalavras: int("numeroPalavras"),
+  padraoFormatacao: mysqlEnum("padraoFormatacao", ["APA", "NBR6023", "Chicago", "Harvard", "Outra"]),
+  padraoFormatacaoOutra: varchar("padraoFormatacaoOutra", { length: 200 }),
+  descricao: text("descricao"),
   publisher: varchar("publisher", { length: 300 }),
   createdAt: timestamp("createdAt").defaultNow(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow(),
@@ -66,6 +80,7 @@ export const submissoes = mysqlTable("submissoes", {
   planoAcao: text("planoAcao"),
   criadorId: varchar("criadorId", { length: 64 }).notNull(),
   periodicoId: varchar("periodicoId", { length: 64 }).notNull(),
+  periodicoSecundarioId: varchar("periodicoSecundarioId", { length: 64 }),
   submissaoOriginalId: varchar("submissaoOriginalId", { length: 64 }),
   createdAt: timestamp("createdAt").defaultNow(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow(),
@@ -104,7 +119,19 @@ export const revisoes = mysqlTable("revisoes", {
   id: varchar("id", { length: 64 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
   dataRecebimento: timestamp("dataRecebimento").notNull(),
   numeroRevisores: int("numeroRevisores").notNull(),
-  comentarios: text("comentarios").notNull(),
+  // Campos separados para cada revisor
+  solicitacaoRevisor1: text("solicitacaoRevisor1"),
+  respostaRevisor1: text("respostaRevisor1"),
+  solicitacaoRevisor2: text("solicitacaoRevisor2"),
+  respostaRevisor2: text("respostaRevisor2"),
+  solicitacaoRevisor3: text("solicitacaoRevisor3"),
+  respostaRevisor3: text("respostaRevisor3"),
+  solicitacaoRevisor4: text("solicitacaoRevisor4"),
+  respostaRevisor4: text("respostaRevisor4"),
+  comentarios: text("comentarios"),
+  // Análise da LLM
+  analisePercentual: int("analisePercentual"),
+  sugestoesLLM: text("sugestoesLLM"),
   submissaoId: varchar("submissaoId", { length: 64 }).notNull(),
   revisorId: varchar("revisorId", { length: 64 }),
   createdAt: timestamp("createdAt").defaultNow(),
@@ -161,14 +188,48 @@ export const historicoStatus = mysqlTable("historico_status", {
 export type HistoricoStatus = typeof historicoStatus.$inferSelect;
 export type InsertHistoricoStatus = typeof historicoStatus.$inferInsert;
 
+/**
+ * Configurações do sistema
+ */
+export const configuracoes = mysqlTable("configuracoes", {
+  id: varchar("id", { length: 64 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: varchar("userId", { length: 64 }).notNull(),
+  // Configurações de LLM
+  llmProvider: mysqlEnum("llmProvider", [
+    "openai",
+    "gemini",
+    "groq",
+    "deepseek",
+    "qwen",
+    "ollama",
+    "claude",
+    "glm",
+    "grok"
+  ]),
+  llmApiKey: text("llmApiKey"),
+  llmModel: varchar("llmModel", { length: 100 }),
+  llmEnabled: boolean("llmEnabled").default(false),
+  createdAt: timestamp("createdAt").defaultNow(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow(),
+}, (table) => ({
+  userIdx: index("user_idx").on(table.userId),
+}));
+
+export type Configuracao = typeof configuracoes.$inferSelect;
+export type InsertConfiguracao = typeof configuracoes.$inferInsert;
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   submissoesCriadas: many(submissoes),
   revisoes: many(revisoes),
+  configuracoes: many(configuracoes),
 }));
 
 export const periodicosRelations = relations(periodicos, ({ many }) => ({
   submissoes: many(submissoes),
+  submissoesSecundarias: many(submissoes, {
+    relationName: "periodicoSecundario",
+  }),
 }));
 
 export const submissoesRelations = relations(submissoes, ({ one, many }) => ({
@@ -179,6 +240,11 @@ export const submissoesRelations = relations(submissoes, ({ one, many }) => ({
   periodico: one(periodicos, {
     fields: [submissoes.periodicoId],
     references: [periodicos.id],
+  }),
+  periodicoSecundario: one(periodicos, {
+    fields: [submissoes.periodicoSecundarioId],
+    references: [periodicos.id],
+    relationName: "periodicoSecundario",
   }),
   submissaoOriginal: one(submissoes, {
     fields: [submissoes.submissaoOriginalId],
@@ -219,6 +285,13 @@ export const historicoStatusRelations = relations(historicoStatus, ({ one }) => 
   submissao: one(submissoes, {
     fields: [historicoStatus.submissaoId],
     references: [submissoes.id],
+  }),
+}));
+
+export const configuracoesRelations = relations(configuracoes, ({ one }) => ({
+  user: one(users, {
+    fields: [configuracoes.userId],
+    references: [users.id],
   }),
 }));
 

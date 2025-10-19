@@ -1,0 +1,5 @@
+ALTER TABLE periodicos DROP COLUMN IF EXISTS sjrQuartile;
+ALTER TABLE periodicos DROP COLUMN IF EXISTS sjrScore;
+ALTER TABLE periodicos DROP COLUMN IF EXISTS jcrQuartile;
+ALTER TABLE periodicos DROP COLUMN IF EXISTS jcrImpactFactor;
+ALTER TABLE periodicos DROP COLUMN IF EXISTS publisher;

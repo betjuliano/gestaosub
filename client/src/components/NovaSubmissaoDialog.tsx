@@ -42,7 +42,9 @@ export default function NovaSubmissaoDialog({ open, onOpenChange }: NovaSubmissa
   const [resumo, setResumo] = useState("");
   const [palavrasChave, setPalavrasChave] = useState("");
   const [periodicoId, setPeriodicoId] = useState("");
+  const [periodicoSecundarioId, setPeriodicoSecundarioId] = useState("");
   const [planoAcao, setPlanoAcao] = useState("");
+  const [showNovoPeriodico, setShowNovoPeriodico] = useState(false);
   const [autores, setAutores] = useState<Autor[]>([
     { nome: "", email: "", instituicao: "", ordem: 0 },
   ]);
@@ -67,7 +69,9 @@ export default function NovaSubmissaoDialog({ open, onOpenChange }: NovaSubmissa
     setResumo("");
     setPalavrasChave("");
     setPeriodicoId("");
+    setPeriodicoSecundarioId("");
     setPlanoAcao("");
+    setShowNovoPeriodico(false);
     setAutores([{ nome: "", email: "", instituicao: "", ordem: 0 }]);
   };
 
@@ -111,6 +115,7 @@ export default function NovaSubmissaoDialog({ open, onOpenChange }: NovaSubmissa
       resumo,
       palavrasChave,
       periodicoId,
+      periodicoSecundarioId: periodicoSecundarioId || undefined,
       planoAcao: planoAcao || undefined,
       autores: autoresValidos,
     });
@@ -145,9 +150,19 @@ export default function NovaSubmissaoDialog({ open, onOpenChange }: NovaSubmissa
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="periodico">
-                Periódico Principal <span className="text-red-500">*</span>
-              </Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="periodico">
+                  Periódico Principal <span className="text-red-500">*</span>
+                </Label>
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  onClick={() => window.open("/periodicos", "_blank")}
+                >
+                  + Cadastrar Novo Periódico
+                </Button>
+              </div>
               <Select value={periodicoId} onValueChange={setPeriodicoId} required>
                 <SelectTrigger>
                   <SelectValue placeholder="Selecione um periódico cadastrado" />
@@ -155,13 +170,36 @@ export default function NovaSubmissaoDialog({ open, onOpenChange }: NovaSubmissa
                 <SelectContent>
                   {periodicos?.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
-                      {p.nome} {p.qualis && `(${p.qualis})`}
+                      {p.nome}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Selecione apenas o periódico principal onde deseja submeter
+                Selecione o periódico principal onde deseja submeter
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="periodicoSecundario">Periódico Secundário (Opcional)</Label>
+              <Select
+                value={periodicoSecundarioId}
+                onValueChange={setPeriodicoSecundarioId}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione um periódico alternativo" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Nenhum</SelectItem>
+                  {periodicos?.filter((p) => p.id !== periodicoId).map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.nome}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Caso seja rejeitado no periódico principal, submeter neste
               </p>
             </div>
 

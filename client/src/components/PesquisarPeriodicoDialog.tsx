@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
 import { Search, BookOpen } from "lucide-react";
-import { useLocation } from "wouter";
+import { PERIODICOS_SEARCH_URL } from "@/const";
 
 interface PesquisarPeriodicoDialogProps {
   open: boolean;
@@ -23,16 +23,16 @@ export default function PesquisarPeriodicoDialog({
   open,
   onOpenChange,
 }: PesquisarPeriodicoDialogProps) {
-  const [, setLocation] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
 
   const { data: resultados, isLoading } = trpc.periodicos.search.useQuery(searchQuery, {
     enabled: searchQuery.length > 0,
   });
 
-  const handlePeriodicoClick = (id: string) => {
+  const handlePeriodicoClick = () => {
+    // Redirecionar para site externo
+    window.open(PERIODICOS_SEARCH_URL, "_blank");
     onOpenChange(false);
-    setLocation(`/periodicos/${id}`);
   };
 
   return (
@@ -75,7 +75,7 @@ export default function PesquisarPeriodicoDialog({
                 {resultados.map((periodico) => (
                   <button
                     key={periodico.id}
-                    onClick={() => handlePeriodicoClick(periodico.id)}
+                    onClick={handlePeriodicoClick}
                     className="w-full p-4 border rounded-lg hover:bg-gray-50 transition-colors text-left"
                   >
                     <div className="flex items-start justify-between">

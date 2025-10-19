@@ -23,14 +23,31 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { ArrowLeft, Plus, BookOpen } from "lucide-react";
 import { useLocation } from "wouter";
+import { QUALIS_LABELS, PADRAO_FORMATACAO_LABELS } from "@/const";
 
 export default function Periodicos() {
   const [, setLocation] = useLocation();
   const [dialogOpen, setDialogOpen] = useState(false);
+  
+  // Campos obrigatórios
   const [nome, setNome] = useState("");
   const [issn, setIssn] = useState("");
+  
+  // Campos opcionais
   const [area, setArea] = useState("");
+  const [abdc, setAbdc] = useState("");
+  const [abs, setAbs] = useState("");
+  const [sjr, setSjr] = useState("");
+  const [jcr, setJcr] = useState("");
+  const [citeScore, setCiteScore] = useState("");
+  const [fatorImpacto, setFatorImpacto] = useState("");
   const [qualis, setQualis] = useState("");
+  const [spell, setSpell] = useState("");
+  const [scielo, setScielo] = useState("");
+  const [hIndex, setHIndex] = useState("");
+  const [numeroPalavras, setNumeroPalavras] = useState("");
+  const [padraoFormatacao, setPadraoFormatacao] = useState("");
+  const [padraoFormatacaoOutra, setPadraoFormatacaoOutra] = useState("");
   const [descricao, setDescricao] = useState("");
 
   const utils = trpc.useUtils();
@@ -52,7 +69,19 @@ export default function Periodicos() {
     setNome("");
     setIssn("");
     setArea("");
+    setAbdc("");
+    setAbs("");
+    setSjr("");
+    setJcr("");
+    setCiteScore("");
+    setFatorImpacto("");
     setQualis("");
+    setSpell("");
+    setScielo("");
+    setHIndex("");
+    setNumeroPalavras("");
+    setPadraoFormatacao("");
+    setPadraoFormatacaoOutra("");
     setDescricao("");
   };
 
@@ -64,11 +93,28 @@ export default function Periodicos() {
       return;
     }
 
+    if (!issn) {
+      toast.error("O ISSN é obrigatório");
+      return;
+    }
+
     createMutation.mutate({
       nome,
-      issn: issn || undefined,
+      issn,
       area: area || undefined,
-      qualis: qualis || undefined,
+      abdc: abdc || undefined,
+      abs: abs || undefined,
+      sjr: sjr || undefined,
+      jcr: jcr || undefined,
+      citeScore: citeScore || undefined,
+      fatorImpacto: fatorImpacto || undefined,
+      qualis: (qualis as any) || undefined,
+      spell: spell || undefined,
+      scielo: scielo || undefined,
+      hIndex: hIndex || undefined,
+      numeroPalavras: numeroPalavras ? parseInt(numeroPalavras) : undefined,
+      padraoFormatacao: (padraoFormatacao as any) || undefined,
+      padraoFormatacaoOutra: padraoFormatacaoOutra || undefined,
       descricao: descricao || undefined,
     });
   };
@@ -120,7 +166,9 @@ export default function Periodicos() {
                     {periodico.area && (
                       <p className="text-sm text-gray-600">Área: {periodico.area}</p>
                     )}
-                    {periodico.qualis && <Badge variant="secondary">{periodico.qualis}</Badge>}
+                    {periodico.qualis && (
+                      <Badge variant="secondary">{QUALIS_LABELS[periodico.qualis]}</Badge>
+                    )}
                     {periodico.descricao && (
                       <p className="text-sm text-gray-600 line-clamp-2 mt-2">
                         {periodico.descricao}
@@ -144,37 +192,166 @@ export default function Periodicos() {
 
       {/* Dialog de Cadastro */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Novo Periódico</DialogTitle>
             <DialogDescription>Cadastre um novo periódico no sistema</DialogDescription>
           </DialogHeader>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="nome">
-                Nome do Periódico <span className="text-red-500">*</span>
-              </Label>
-              <Input
-                id="nome"
-                placeholder="Digite o nome completo do periódico"
-                value={nome}
-                onChange={(e) => setNome(e.target.value)}
-                required
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Campos Obrigatórios */}
+            <div className="space-y-4">
+              <h3 className="font-semibold text-lg">Informações Obrigatórias</h3>
+              
               <div className="space-y-2">
-                <Label htmlFor="issn">ISSN</Label>
+                <Label htmlFor="nome">
+                  Nome do Periódico <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="nome"
+                  placeholder="Digite o nome completo do periódico"
+                  value={nome}
+                  onChange={(e) => setNome(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="issn">
+                  ISSN <span className="text-red-500">*</span>
+                </Label>
                 <Input
                   id="issn"
                   placeholder="0000-0000"
                   value={issn}
                   onChange={(e) => setIssn(e.target.value)}
+                  required
                 />
               </div>
+            </div>
 
+            {/* Classificações */}
+            <div className="space-y-4">
+              <h3 className="font-semibold text-lg">Classificações (Opcionais)</h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="abdc">ABDC</Label>
+                  <Input id="abdc" value={abdc} onChange={(e) => setAbdc(e.target.value)} />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="abs">ABS</Label>
+                  <Input id="abs" value={abs} onChange={(e) => setAbs(e.target.value)} />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="sjr">SJR</Label>
+                  <Input id="sjr" value={sjr} onChange={(e) => setSjr(e.target.value)} />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="jcr">JCR</Label>
+                  <Input id="jcr" value={jcr} onChange={(e) => setJcr(e.target.value)} />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="citeScore">CiteScore</Label>
+                  <Input
+                    id="citeScore"
+                    value={citeScore}
+                    onChange={(e) => setCiteScore(e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="fatorImpacto">Fator de Impacto</Label>
+                  <Input
+                    id="fatorImpacto"
+                    value={fatorImpacto}
+                    onChange={(e) => setFatorImpacto(e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="qualis">Qualis</Label>
+                  <Select value={qualis} onValueChange={setQualis}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(QUALIS_LABELS).map(([key, label]) => (
+                        <SelectItem key={key} value={key}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="spell">SPELL</Label>
+                  <Input id="spell" value={spell} onChange={(e) => setSpell(e.target.value)} />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="scielo">Scielo</Label>
+                  <Input id="scielo" value={scielo} onChange={(e) => setScielo(e.target.value)} />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="hIndex">H Index</Label>
+                  <Input id="hIndex" value={hIndex} onChange={(e) => setHIndex(e.target.value)} />
+                </div>
+              </div>
+            </div>
+
+            {/* Formatação */}
+            <div className="space-y-4">
+              <h3 className="font-semibold text-lg">Formatação (Opcional)</h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="numeroPalavras">Número de Palavras</Label>
+                  <Input
+                    id="numeroPalavras"
+                    type="number"
+                    value={numeroPalavras}
+                    onChange={(e) => setNumeroPalavras(e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="padraoFormatacao">Padrão de Formatação</Label>
+                  <Select value={padraoFormatacao} onValueChange={setPadraoFormatacao}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(PADRAO_FORMATACAO_LABELS).map(([key, label]) => (
+                        <SelectItem key={key} value={key}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {padraoFormatacao === "Outra" && (
+                  <div className="space-y-2 md:col-span-2">
+                    <Label htmlFor="padraoFormatacaoOutra">Especifique o Padrão</Label>
+                    <Input
+                      id="padraoFormatacaoOutra"
+                      value={padraoFormatacaoOutra}
+                      onChange={(e) => setPadraoFormatacaoOutra(e.target.value)}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Outros */}
+            <div className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="area">Área de Conhecimento</Label>
                 <Input
@@ -184,36 +361,17 @@ export default function Periodicos() {
                   onChange={(e) => setArea(e.target.value)}
                 />
               </div>
-            </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="qualis">Classificação Qualis</Label>
-              <Select value={qualis} onValueChange={setQualis}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione a classificação" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="A1">A1</SelectItem>
-                  <SelectItem value="A2">A2</SelectItem>
-                  <SelectItem value="B1">B1</SelectItem>
-                  <SelectItem value="B2">B2</SelectItem>
-                  <SelectItem value="B3">B3</SelectItem>
-                  <SelectItem value="B4">B4</SelectItem>
-                  <SelectItem value="B5">B5</SelectItem>
-                  <SelectItem value="C">C</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="descricao">Descrição / Escopo Editorial</Label>
-              <Textarea
-                id="descricao"
-                placeholder="Descreva o escopo e foco do periódico"
-                value={descricao}
-                onChange={(e) => setDescricao(e.target.value)}
-                rows={4}
-              />
+              <div className="space-y-2">
+                <Label htmlFor="descricao">Descrição / Escopo Editorial</Label>
+                <Textarea
+                  id="descricao"
+                  placeholder="Descreva o escopo e foco do periódico"
+                  value={descricao}
+                  onChange={(e) => setDescricao(e.target.value)}
+                  rows={4}
+                />
+              </div>
             </div>
 
             <div className="flex justify-end gap-3">

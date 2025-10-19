@@ -4,21 +4,28 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import { z } from "zod";
 import * as db from "./db";
+import { invokeLLM } from "./_core/llm";
 
 // ============= SCHEMAS DE VALIDAÇÃO =============
 
 const createPeriodicoSchema = z.object({
   nome: z.string().min(1),
-  issn: z.string().optional(),
+  issn: z.string().min(1),
   area: z.string().optional(),
-  qualis: z.string().optional(),
-  descricao: z.string().optional(),
   abdc: z.string().optional(),
   abs: z.string().optional(),
-  sjrQuartile: z.string().optional(),
-  sjrScore: z.string().optional(),
-  jcrQuartile: z.string().optional(),
-  jcrImpactFactor: z.string().optional(),
+  sjr: z.string().optional(),
+  jcr: z.string().optional(),
+  citeScore: z.string().optional(),
+  fatorImpacto: z.string().optional(),
+  qualis: z.enum(["muito_bom", "bom", "fraco", "sem_classificacao"]).optional(),
+  spell: z.string().optional(),
+  scielo: z.string().optional(),
+  hIndex: z.string().optional(),
+  numeroPalavras: z.number().optional(),
+  padraoFormatacao: z.enum(["APA", "NBR6023", "Chicago", "Harvard", "Outra"]).optional(),
+  padraoFormatacaoOutra: z.string().optional(),
+  descricao: z.string().optional(),
   publisher: z.string().optional(),
 });
 
@@ -29,45 +36,48 @@ const autorSchema = z.object({
   ordem: z.number().default(0),
 });
 
-const periodicoAlternativoSchema = z.object({
-  periodicoNome: z.string().min(1),
-  periodicoISSN: z.string().optional(),
-  periodicoArea: z.string().optional(),
-  prioridade: z.number(),
-  motivo: z.string().optional(),
-});
-
 const createSubmissaoSchema = z.object({
   titulo: z.string().min(1),
   resumo: z.string().min(1),
   palavrasChave: z.string().min(1),
   periodicoId: z.string().min(1),
+  periodicoSecundarioId: z.string().optional(),
   planoAcao: z.string().optional(),
   autores: z.array(autorSchema),
-  periodicosAlternativos: z.array(periodicoAlternativoSchema).optional(),
-  submissaoOriginalId: z.string().optional(),
-});
-
-const updateSubmissaoSchema = z.object({
-  id: z.string(),
-  titulo: z.string().optional(),
-  resumo: z.string().optional(),
-  palavrasChave: z.string().optional(),
-  status: z
-    .enum(["EM_AVALIACAO", "APROVADO", "REJEITADO", "REVISAO_SOLICITADA", "SUBMETIDO_NOVAMENTE"])
-    .optional(),
-  planoAcao: z.string().optional(),
-  periodicoId: z.string().optional(),
-  autores: z.array(autorSchema).optional(),
-  periodicosAlternativos: z.array(periodicoAlternativoSchema).optional(),
 });
 
 const createRevisaoSchema = z.object({
   submissaoId: z.string().min(1),
   dataRecebimento: z.date(),
-  numeroRevisores: z.number().min(1),
-  comentarios: z.string().min(1),
+  numeroRevisores: z.number().min(1).max(4),
+  solicitacaoRevisor1: z.string().optional(),
+  respostaRevisor1: z.string().optional(),
+  solicitacaoRevisor2: z.string().optional(),
+  respostaRevisor2: z.string().optional(),
+  solicitacaoRevisor3: z.string().optional(),
+  respostaRevisor3: z.string().optional(),
+  solicitacaoRevisor4: z.string().optional(),
+  respostaRevisor4: z.string().optional(),
+  comentarios: z.string().optional(),
   revisorId: z.string().optional(),
+});
+
+const updateUserProfileSchema = z.object({
+  name: z.string().optional(),
+  universidade: z.string().optional(),
+  areaFormacao: z.string().optional(),
+  nivelFormacao: z.enum(["graduacao", "mestrado", "doutorado", "pos_doutorado"]).optional(),
+  universidadeOrigem: z.string().optional(),
+  telefone: z.string().optional(),
+});
+
+const updateConfiguracaoSchema = z.object({
+  llmProvider: z
+    .enum(["openai", "gemini", "groq", "deepseek", "qwen", "ollama", "claude", "glm", "grok"])
+    .optional(),
+  llmApiKey: z.string().optional(),
+  llmModel: z.string().optional(),
+  llmEnabled: z.boolean().optional(),
 });
 
 // ============= ROUTERS =============
@@ -86,6 +96,20 @@ export const appRouter = router({
     }),
   }),
 
+  // ============= USUÁRIOS =============
+  usuarios: router({
+    list: publicProcedure.query(async () => {
+      return await db.getAllUsers();
+    }),
+
+    updateProfile: protectedProcedure
+      .input(updateUserProfileSchema)
+      .mutation(async ({ ctx, input }) => {
+        await db.updateUserProfile(ctx.user.id, input);
+        return { success: true };
+      }),
+  }),
+
   // ============= DASHBOARD =============
   dashboard: router({
     stats: publicProcedure.query(async () => {
@@ -98,21 +122,10 @@ export const appRouter = router({
     }),
 
     periodicosMaisUtilizados: publicProcedure
-      .input(z.number().default(10))
+      .input(z.number().default(5))
       .query(async ({ input }) => {
         return await db.getPeriodicosMaisUtilizados(input);
       }),
-  }),
-
-  // ============= USUÁRIOS =============
-  usuarios: router({
-    list: publicProcedure.query(async () => {
-      return await db.getAllUsers();
-    }),
-
-    getById: publicProcedure.input(z.string()).query(async ({ input }) => {
-      return await db.getUser(input);
-    }),
   }),
 
   // ============= PERIÓDICOS =============
@@ -126,31 +139,12 @@ export const appRouter = router({
     }),
 
     search: publicProcedure.input(z.string()).query(async ({ input }) => {
-      if (!input || input.trim() === "") {
-        return await db.getAllPeriodicos();
-      }
+      if (!input || input.length < 2) return [];
       return await db.searchPeriodicos(input);
     }),
 
     create: protectedProcedure.input(createPeriodicoSchema).mutation(async ({ input }) => {
       await db.createPeriodico(input);
-      return { success: true };
-    }),
-
-    update: protectedProcedure
-      .input(
-        z.object({
-          id: z.string(),
-          data: createPeriodicoSchema.partial(),
-        })
-      )
-      .mutation(async ({ input }) => {
-        await db.updatePeriodico(input.id, input.data);
-        return { success: true };
-      }),
-
-    delete: protectedProcedure.input(z.string()).mutation(async ({ input }) => {
-      await db.deletePeriodico(input);
       return { success: true };
     }),
 
@@ -170,118 +164,36 @@ export const appRouter = router({
     }),
 
     getById: publicProcedure.input(z.string()).query(async ({ input }) => {
-      const submissao = await db.getSubmissaoById(input);
-      if (!submissao) return null;
-
-      const autores = await db.getAutoresBySubmissao(input);
-      const revisoes = await db.getRevisoesBySubmissao(input);
-      const periodicosAlt = await db.getPeriodicosAlternativosBySubmissao(input);
-      const historico = await db.getHistoricoBySubmissao(input);
-
-      return {
-        ...submissao,
-        autores,
-        revisoes,
-        periodicosAlternativos: periodicosAlt,
-        historico,
-      };
+      return await db.getSubmissaoById(input);
     }),
 
-    byStatus: publicProcedure.input(z.string()).query(async ({ input }) => {
-      return await db.getSubmissoesByStatus(input);
-    }),
+    create: protectedProcedure.input(createSubmissaoSchema).mutation(async ({ ctx, input }) => {
+      const submissaoId = crypto.randomUUID();
 
-    byPeriodico: publicProcedure.input(z.string()).query(async ({ input }) => {
-      return await db.getSubmissoesByPeriodico(input);
-    }),
-
-    byCriador: publicProcedure.input(z.string()).query(async ({ input }) => {
-      return await db.getSubmissoesByCriador(input);
-    }),
-
-    create: protectedProcedure.input(createSubmissaoSchema).mutation(async ({ input, ctx }) => {
-      const submissaoData = {
+      await db.createSubmissao({
+        id: submissaoId,
         titulo: input.titulo,
         resumo: input.resumo,
         palavrasChave: input.palavrasChave,
         periodicoId: input.periodicoId,
+        periodicoSecundarioId: input.periodicoSecundarioId,
         planoAcao: input.planoAcao,
         criadorId: ctx.user.id,
-        submissaoOriginalId: input.submissaoOriginalId,
-      };
-
-      const submissaoId = crypto.randomUUID();
-      await db.createSubmissao({ ...submissaoData, id: submissaoId });
-
-      // Criar autores
-      for (const autor of input.autores) {
-        await db.createAutor({
-          ...autor,
-          submissaoId: submissaoId.toString(),
-        });
-      }
-
-      // Criar periódicos alternativos
-      if (input.periodicosAlternativos) {
-        for (const alt of input.periodicosAlternativos) {
-          await db.createPeriodicoAlternativo({
-            ...alt,
-            submissaoId: submissaoId.toString(),
-          });
-        }
-      }
-
-      // Criar histórico inicial
-      await db.createHistoricoStatus({
-        submissaoId: submissaoId.toString(),
+        dataSubmissao: new Date(),
         status: "EM_AVALIACAO",
-        observacao: "Submissão criada",
       });
 
-      return { success: true, id: submissaoId.toString() };
-    }),
+      const autoresData = input.autores.map((autor, index) => ({
+        ...autor,
+        submissaoId,
+        ordem: index,
+      }));
 
-    update: protectedProcedure.input(updateSubmissaoSchema).mutation(async ({ input }) => {
-      const { id, autores, periodicosAlternativos, status, ...updateData } = input;
+      await db.createAutores(autoresData);
 
-      // Atualizar dados básicos
-      if (Object.keys(updateData).length > 0) {
-        await db.updateSubmissao(id, updateData);
-      }
+      await db.updateSubmissaoStatus(submissaoId, "EM_AVALIACAO", "Submissão criada");
 
-      // Atualizar autores se fornecidos
-      if (autores) {
-        await db.deleteAutoresBySubmissao(id);
-        for (const autor of autores) {
-          await db.createAutor({
-            ...autor,
-            submissaoId: id,
-          });
-        }
-      }
-
-      // Atualizar periódicos alternativos se fornecidos
-      if (periodicosAlternativos) {
-        await db.deletePeriodicosAlternativosBySubmissao(id);
-        for (const alt of periodicosAlternativos) {
-          await db.createPeriodicoAlternativo({
-            ...alt,
-            submissaoId: id,
-          });
-        }
-      }
-
-      // Se o status mudou, criar histórico
-      if (status) {
-        await db.updateSubmissao(id, { status });
-        await db.createHistoricoStatus({
-          submissaoId: id,
-          status,
-          observacao: `Status alterado para ${status}`,
-        });
-      }
-
-      return { success: true };
+      return { success: true, id: submissaoId };
     }),
 
     updateStatus: protectedProcedure
@@ -299,24 +211,9 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ input }) => {
-        await db.updateSubmissao(input.id, { status: input.status });
-        await db.createHistoricoStatus({
-          submissaoId: input.id,
-          status: input.status,
-          observacao: input.observacao || `Status alterado para ${input.status}`,
-        });
+        await db.updateSubmissaoStatus(input.id, input.status, input.observacao);
         return { success: true };
       }),
-
-    delete: protectedProcedure.input(z.string()).mutation(async ({ input }) => {
-      // Deletar dados relacionados
-      await db.deleteAutoresBySubmissao(input);
-      await db.deletePeriodicosAlternativosBySubmissao(input);
-
-      // Deletar submissão
-      await db.deleteSubmissao(input);
-      return { success: true };
-    }),
   }),
 
   // ============= REVISÕES =============
@@ -325,120 +222,98 @@ export const appRouter = router({
       return await db.getAllRevisoes();
     }),
 
-    bySubmissao: publicProcedure.input(z.string()).query(async ({ input }) => {
-      return await db.getRevisoesBySubmissao(input);
-    }),
+    create: protectedProcedure.input(createRevisaoSchema).mutation(async ({ ctx, input }) => {
+      const revisaoId = crypto.randomUUID();
 
-    create: protectedProcedure.input(createRevisaoSchema).mutation(async ({ input }) => {
-      await db.createRevisao(input);
-      return { success: true };
-    }),
+      await db.createRevisao({
+        id: revisaoId,
+        ...input,
+        revisorId: ctx.user.id,
+      });
 
-    update: protectedProcedure
-      .input(
-        z.object({
-          id: z.string(),
-          data: createRevisaoSchema.partial().omit({ submissaoId: true }),
-        })
-      )
-      .mutation(async ({ input }) => {
-        await db.updateRevisao(input.id, input.data);
-        return { success: true };
-      }),
+      // Se LLM estiver habilitada, analisar automaticamente
+      const config = await db.getConfiguracao(ctx.user.id);
+      if (config?.llmEnabled && config.llmApiKey) {
+        try {
+          // Construir prompt para análise
+          const solicitacoes: string[] = [];
+          const respostas: string[] = [];
 
-    delete: protectedProcedure.input(z.string()).mutation(async ({ input }) => {
-      await db.deleteRevisao(input);
-      return { success: true };
+          for (let i = 1; i <= input.numeroRevisores; i++) {
+            const solKey = `solicitacaoRevisor${i}` as keyof typeof input;
+            const respKey = `respostaRevisor${i}` as keyof typeof input;
+
+            if (input[solKey]) solicitacoes.push(input[solKey] as string);
+            if (input[respKey]) respostas.push(input[respKey] as string);
+          }
+
+          if (solicitacoes.length > 0 && respostas.length > 0) {
+            const prompt = `Analise se as respostas fornecidas atendem às solicitações dos revisores.
+
+SOLICITAÇÕES DOS REVISORES:
+${solicitacoes.map((s, i) => `${i + 1}. ${s}`).join("\n")}
+
+RESPOSTAS FORNECIDAS:
+${respostas.map((r, i) => `${i + 1}. ${r}`).join("\n")}
+
+Forneça:
+1. Um percentual (0-100) de quanto as respostas atendem às solicitações
+2. Sugestões específicas para atender plenamente cada solicitação (sem alucinar, apenas cruzando o que foi feito com o que foi pedido)
+
+Responda em formato JSON:
+{
+  "percentual": número,
+  "sugestoes": "texto com sugestões detalhadas"
+}`;
+
+            const llmResponse = await invokeLLM({
+              messages: [
+                { role: "system", content: "Você é um assistente especializado em análise de revisões acadêmicas." },
+                { role: "user", content: prompt },
+              ],
+              response_format: {
+                type: "json_schema",
+                json_schema: {
+                  name: "analise_revisao",
+                  strict: true,
+                  schema: {
+                    type: "object",
+                    properties: {
+                      percentual: { type: "number" },
+                      sugestoes: { type: "string" },
+                    },
+                    required: ["percentual", "sugestoes"],
+                    additionalProperties: false,
+                  },
+                },
+              },
+            });
+
+            const content = llmResponse.choices[0].message.content;
+            const analise = JSON.parse(typeof content === 'string' ? content : "{}");
+            await db.updateRevisaoAnalise(revisaoId, analise.percentual, analise.sugestoes);
+          }
+        } catch (error) {
+          console.error("Erro ao analisar revisão com LLM:", error);
+        }
+      }
+
+      return { success: true, id: revisaoId };
     }),
   }),
 
-  // ============= REENCAMINHAMENTO INTELIGENTE =============
-  reencaminhamento: router({
-    sugestoes: publicProcedure.input(z.string()).query(async ({ input }) => {
-      const submissao = await db.getSubmissaoById(input);
-      if (!submissao) return [];
+  // ============= CONFIGURAÇÕES =============
+  configuracoes: router({
+    get: protectedProcedure.query(async ({ ctx }) => {
+      return await db.getConfiguracao(ctx.user.id);
+    }),
 
-      const todosPeriodicos = await db.getAllPeriodicos();
-      const palavrasChaveSubmissao = submissao.submissao.palavrasChave
-        .toLowerCase()
-        .split(",")
-        .map((p) => p.trim());
-
-      // Calcular pontuação para cada periódico
-      const sugestoes = todosPeriodicos
-        .filter((p) => p.id !== submissao.submissao.periodicoId)
-        .map((periodico) => {
-          let pontuacao = 0;
-
-          // 1. Alinhamento de área (40%)
-          if (periodico.area && submissao.periodico?.area) {
-            if (periodico.area.toLowerCase() === submissao.periodico.area.toLowerCase()) {
-              pontuacao += 40;
-            } else if (
-              periodico.area.toLowerCase().includes(submissao.periodico.area.toLowerCase()) ||
-              submissao.periodico.area.toLowerCase().includes(periodico.area.toLowerCase())
-            ) {
-              pontuacao += 24; // 60% de 40
-            } else {
-              pontuacao += 8; // 20% de 40
-            }
-          }
-
-          // 2. Classificação Qualis (30%)
-          const qualisScores: Record<string, number> = {
-            A1: 30,
-            A2: 27,
-            B1: 22.5,
-            B2: 18,
-            B3: 13.5,
-            B4: 9,
-            B5: 6,
-          };
-          if (periodico.qualis) {
-            pontuacao += qualisScores[periodico.qualis] || 9;
-          } else {
-            pontuacao += 9;
-          }
-
-          // 3. Palavras-chave (10%)
-          if (periodico.descricao) {
-            const descricaoLower = periodico.descricao.toLowerCase();
-            const matches = palavrasChaveSubmissao.filter((palavra) =>
-              descricaoLower.includes(palavra)
-            ).length;
-            pontuacao += (matches / palavrasChaveSubmissao.length) * 10;
-          }
-
-          // 4. Popularidade (20%) - será calculado com base em submissões
-          // Por enquanto, adicionar pontuação base
-          pontuacao += 10;
-
-          // Determinar alinhamento
-          let alinhamento: "alto" | "medio" | "baixo";
-          if (pontuacao >= 80) alinhamento = "alto";
-          else if (pontuacao >= 60) alinhamento = "medio";
-          else alinhamento = "baixo";
-
-          // Gerar motivo
-          const motivos = [];
-          if (periodico.area === submissao.periodico?.area) {
-            motivos.push("Mesma área de conhecimento");
-          }
-          if (periodico.qualis && ["A1", "A2", "B1"].includes(periodico.qualis)) {
-            motivos.push(`Classificação Qualis ${periodico.qualis}`);
-          }
-
-          return {
-            periodico,
-            pontuacao: Math.round(pontuacao),
-            alinhamento,
-            motivo: motivos.join(", ") || "Periódico relevante na área",
-          };
-        })
-        .sort((a, b) => b.pontuacao - a.pontuacao)
-        .slice(0, 10);
-
-      return sugestoes;
+    update: protectedProcedure.input(updateConfiguracaoSchema).mutation(async ({ ctx, input }) => {
+      await db.upsertConfiguracao({
+        userId: ctx.user.id,
+        ...input,
+      });
+      return { success: true };
     }),
   }),
 });

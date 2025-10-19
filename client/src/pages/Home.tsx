@@ -17,8 +17,9 @@ import {
   BookOpen,
   Users,
   FileCheck,
+  Settings,
 } from "lucide-react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import NovaSubmissaoDialog from "@/components/NovaSubmissaoDialog";
 import PesquisarPeriodicoDialog from "@/components/PesquisarPeriodicoDialog";
 import GerenciarUsuariosDialog from "@/components/GerenciarUsuariosDialog";
@@ -28,6 +29,7 @@ export default function Home() {
   const [novaSubmissaoOpen, setNovaSubmissaoOpen] = useState(false);
   const [pesquisarPeriodicoOpen, setPesquisarPeriodicoOpen] = useState(false);
   const [gerenciarUsuariosOpen, setGerenciarUsuariosOpen] = useState(false);
+  const [, setLocation] = useLocation();
   const [activeTab, setActiveTab] = useState("recentes");
 
   const { data: stats, isLoading: statsLoading } = trpc.dashboard.stats.useQuery();
@@ -82,6 +84,10 @@ export default function Home() {
                   <FileCheck className="w-4 h-4 mr-2" />
                   Revisões
                 </Link>
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setLocation("/configuracoes")}>
+                <Settings className="w-4 h-4 mr-2" />
+                Configurações
               </Button>
               <Button onClick={() => setNovaSubmissaoOpen(true)}>
                 <Plus className="w-4 h-4 mr-2" />

@@ -1,4 +1,4 @@
-import { eq, desc, and, like, or, sql, asc } from "drizzle-orm";
+import { eq, desc, like, or, sql, and, count } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertUser,
@@ -15,10 +15,8 @@ import {
   InsertPeriodicoAlternativo,
   historicoStatus,
   InsertHistoricoStatus,
-  Periodico,
-  Submissao,
-  Autor,
-  Revisao,
+  configuracoes,
+  InsertConfiguracao,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -50,12 +48,18 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   }
 
   try {
-    const values: InsertUser = {
-      id: user.id,
-    };
+    const values: InsertUser = { id: user.id };
     const updateSet: Record<string, unknown> = {};
 
-    const textFields = ["name", "email", "loginMethod"] as const;
+    const textFields = [
+      "name",
+      "email",
+      "loginMethod",
+      "universidade",
+      "areaFormacao",
+      "universidadeOrigem",
+      "telefone",
+    ] as const;
     type TextField = (typeof textFields)[number];
 
     const assignNullable = (field: TextField) => {
@@ -68,10 +72,16 @@ export async function upsertUser(user: InsertUser): Promise<void> {
 
     textFields.forEach(assignNullable);
 
+    if (user.nivelFormacao !== undefined) {
+      values.nivelFormacao = user.nivelFormacao;
+      updateSet.nivelFormacao = user.nivelFormacao;
+    }
+
     if (user.lastSignedIn !== undefined) {
       values.lastSignedIn = user.lastSignedIn;
       updateSet.lastSignedIn = user.lastSignedIn;
     }
+
     if (user.role === undefined) {
       if (user.id === ENV.ownerId) {
         user.role = "admin";
@@ -95,20 +105,34 @@ export async function upsertUser(user: InsertUser): Promise<void> {
 
 export async function getUser(id: string) {
   const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot get user: database not available");
-    return undefined;
-  }
+  if (!db) return undefined;
 
   const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
-
   return result.length > 0 ? result[0] : undefined;
 }
 
 export async function getAllUsers() {
   const db = await getDb();
   if (!db) return [];
+
   return await db.select().from(users).orderBy(desc(users.createdAt));
+}
+
+export async function updateUserProfile(
+  userId: string,
+  data: {
+    name?: string;
+    universidade?: string;
+    areaFormacao?: string;
+    nivelFormacao?: "graduacao" | "mestrado" | "doutorado" | "pos_doutorado";
+    universidadeOrigem?: string;
+    telefone?: string;
+  }
+) {
+  const db = await getDb();
+  if (!db) return;
+
+  await db.update(users).set(data).where(eq(users.id, userId));
 }
 
 // ============= PERIÓDICOS =============
@@ -124,15 +148,16 @@ export async function createPeriodico(data: InsertPeriodico) {
 export async function getAllPeriodicos() {
   const db = await getDb();
   if (!db) return [];
-  return await db.select().from(periodicos).orderBy(asc(periodicos.nome));
+
+  return await db.select().from(periodicos).orderBy(periodicos.nome);
 }
 
 export async function getPeriodicoById(id: string) {
   const db = await getDb();
-  if (!db) return null;
+  if (!db) return undefined;
 
   const result = await db.select().from(periodicos).where(eq(periodicos.id, id)).limit(1);
-  return result.length > 0 ? result[0] : null;
+  return result.length > 0 ? result[0] : undefined;
 }
 
 export async function searchPeriodicos(query: string) {
@@ -149,329 +174,25 @@ export async function searchPeriodicos(query: string) {
         like(periodicos.area, `%${query}%`)
       )
     )
-    .orderBy(asc(periodicos.nome));
-}
-
-export async function updatePeriodico(id: string, data: Partial<InsertPeriodico>) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  return await db.update(periodicos).set(data).where(eq(periodicos.id, id));
-}
-
-export async function deletePeriodico(id: string) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  return await db.delete(periodicos).where(eq(periodicos.id, id));
-}
-
-// ============= SUBMISSÕES =============
-
-export async function createSubmissao(data: InsertSubmissao) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  const result = await db.insert(submissoes).values(data);
-  return result;
-}
-
-export async function getAllSubmissoes() {
-  const db = await getDb();
-  if (!db) return [];
-
-  return await db
-    .select({
-      submissao: submissoes,
-      periodico: periodicos,
-      criador: users,
-    })
-    .from(submissoes)
-    .leftJoin(periodicos, eq(submissoes.periodicoId, periodicos.id))
-    .leftJoin(users, eq(submissoes.criadorId, users.id))
-    .orderBy(desc(submissoes.dataSubmissao));
-}
-
-export async function getSubmissaoById(id: string) {
-  const db = await getDb();
-  if (!db) return null;
-
-  const result = await db
-    .select({
-      submissao: submissoes,
-      periodico: periodicos,
-      criador: users,
-    })
-    .from(submissoes)
-    .leftJoin(periodicos, eq(submissoes.periodicoId, periodicos.id))
-    .leftJoin(users, eq(submissoes.criadorId, users.id))
-    .where(eq(submissoes.id, id))
-    .limit(1);
-
-  return result.length > 0 ? result[0] : null;
-}
-
-export async function getSubmissoesByStatus(status: string) {
-  const db = await getDb();
-  if (!db) return [];
-
-  return await db
-    .select({
-      submissao: submissoes,
-      periodico: periodicos,
-      criador: users,
-    })
-    .from(submissoes)
-    .leftJoin(periodicos, eq(submissoes.periodicoId, periodicos.id))
-    .leftJoin(users, eq(submissoes.criadorId, users.id))
-    .where(eq(submissoes.status, status as any))
-    .orderBy(desc(submissoes.dataSubmissao));
-}
-
-export async function getSubmissoesByPeriodico(periodicoId: string) {
-  const db = await getDb();
-  if (!db) return [];
-
-  return await db
-    .select({
-      submissao: submissoes,
-      periodico: periodicos,
-      criador: users,
-    })
-    .from(submissoes)
-    .leftJoin(periodicos, eq(submissoes.periodicoId, periodicos.id))
-    .leftJoin(users, eq(submissoes.criadorId, users.id))
-    .where(eq(submissoes.periodicoId, periodicoId))
-    .orderBy(desc(submissoes.dataSubmissao));
-}
-
-export async function getSubmissoesByCriador(criadorId: string) {
-  const db = await getDb();
-  if (!db) return [];
-
-  return await db
-    .select({
-      submissao: submissoes,
-      periodico: periodicos,
-      criador: users,
-    })
-    .from(submissoes)
-    .leftJoin(periodicos, eq(submissoes.periodicoId, periodicos.id))
-    .leftJoin(users, eq(submissoes.criadorId, users.id))
-    .where(eq(submissoes.criadorId, criadorId))
-    .orderBy(desc(submissoes.dataSubmissao));
-}
-
-export async function updateSubmissao(id: string, data: Partial<InsertSubmissao>) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  return await db.update(submissoes).set(data).where(eq(submissoes.id, id));
-}
-
-export async function deleteSubmissao(id: string) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  return await db.delete(submissoes).where(eq(submissoes.id, id));
-}
-
-// ============= AUTORES =============
-
-export async function createAutor(data: InsertAutor) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  return await db.insert(autores).values(data);
-}
-
-export async function getAutoresBySubmissao(submissaoId: string) {
-  const db = await getDb();
-  if (!db) return [];
-
-  return await db
-    .select()
-    .from(autores)
-    .where(eq(autores.submissaoId, submissaoId))
-    .orderBy(asc(autores.ordem));
-}
-
-export async function deleteAutoresBySubmissao(submissaoId: string) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  return await db.delete(autores).where(eq(autores.submissaoId, submissaoId));
-}
-
-// ============= REVISÕES =============
-
-export async function createRevisao(data: InsertRevisao) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  return await db.insert(revisoes).values(data);
-}
-
-export async function getAllRevisoes() {
-  const db = await getDb();
-  if (!db) return [];
-
-  return await db
-    .select({
-      revisao: revisoes,
-      submissao: submissoes,
-      revisor: users,
-    })
-    .from(revisoes)
-    .leftJoin(submissoes, eq(revisoes.submissaoId, submissoes.id))
-    .leftJoin(users, eq(revisoes.revisorId, users.id))
-    .orderBy(desc(revisoes.dataRecebimento));
-}
-
-export async function getRevisoesBySubmissao(submissaoId: string) {
-  const db = await getDb();
-  if (!db) return [];
-
-  return await db
-    .select({
-      revisao: revisoes,
-      revisor: users,
-    })
-    .from(revisoes)
-    .leftJoin(users, eq(revisoes.revisorId, users.id))
-    .where(eq(revisoes.submissaoId, submissaoId))
-    .orderBy(desc(revisoes.dataRecebimento));
-}
-
-export async function updateRevisao(id: string, data: Partial<InsertRevisao>) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  return await db.update(revisoes).set(data).where(eq(revisoes.id, id));
-}
-
-export async function deleteRevisao(id: string) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  return await db.delete(revisoes).where(eq(revisoes.id, id));
-}
-
-// ============= PERIÓDICOS ALTERNATIVOS =============
-
-export async function createPeriodicoAlternativo(data: InsertPeriodicoAlternativo) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  return await db.insert(periodicosAlternativos).values(data);
-}
-
-export async function getPeriodicosAlternativosBySubmissao(submissaoId: string) {
-  const db = await getDb();
-  if (!db) return [];
-
-  return await db
-    .select()
-    .from(periodicosAlternativos)
-    .where(eq(periodicosAlternativos.submissaoId, submissaoId))
-    .orderBy(asc(periodicosAlternativos.prioridade));
-}
-
-export async function deletePeriodicosAlternativosBySubmissao(submissaoId: string) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  return await db
-    .delete(periodicosAlternativos)
-    .where(eq(periodicosAlternativos.submissaoId, submissaoId));
-}
-
-// ============= HISTÓRICO DE STATUS =============
-
-export async function createHistoricoStatus(data: InsertHistoricoStatus) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
-  return await db.insert(historicoStatus).values(data);
-}
-
-export async function getHistoricoBySubmissao(submissaoId: string) {
-  const db = await getDb();
-  if (!db) return [];
-
-  return await db
-    .select()
-    .from(historicoStatus)
-    .where(eq(historicoStatus.submissaoId, submissaoId))
-    .orderBy(desc(historicoStatus.data));
-}
-
-// ============= ESTATÍSTICAS =============
-
-export async function getDashboardStats() {
-  const db = await getDb();
-  if (!db)
-    return {
-      totalSubmissoes: 0,
-      emAvaliacao: 0,
-      aprovadas: 0,
-      rejeitadas: 0,
-      revisaoSolicitada: 0,
-    };
-
-  const stats = await db
-    .select({
-      status: submissoes.status,
-      count: sql<number>`count(*)`.as("count"),
-    })
-    .from(submissoes)
-    .groupBy(submissoes.status);
-
-  const result = {
-    totalSubmissoes: 0,
-    emAvaliacao: 0,
-    aprovadas: 0,
-    rejeitadas: 0,
-    revisaoSolicitada: 0,
-  };
-
-  stats.forEach((stat) => {
-    const count = Number(stat.count);
-    result.totalSubmissoes += count;
-
-    switch (stat.status) {
-      case "EM_AVALIACAO":
-        result.emAvaliacao = count;
-        break;
-      case "APROVADO":
-        result.aprovadas = count;
-        break;
-      case "REJEITADO":
-        result.rejeitadas = count;
-        break;
-      case "REVISAO_SOLICITADA":
-        result.revisaoSolicitada = count;
-        break;
-    }
-  });
-
-  return result;
+    .orderBy(periodicos.nome);
 }
 
 export async function getPeriodicosMaisUtilizados(limit: number = 10) {
   const db = await getDb();
   if (!db) return [];
 
-  return await db
+  const result = await db
     .select({
       periodico: periodicos,
-      totalSubmissoes: sql<number>`count(${submissoes.id})`.as("total"),
+      totalSubmissoes: count(submissoes.id).as("totalSubmissoes"),
     })
     .from(periodicos)
     .leftJoin(submissoes, eq(periodicos.id, submissoes.periodicoId))
     .groupBy(periodicos.id)
-    .orderBy(desc(sql`count(${submissoes.id})`))
+    .orderBy(desc(sql`totalSubmissoes`))
     .limit(limit);
+
+  return result;
 }
 
 export async function getPeriodicoStats(periodicoId: string) {
@@ -488,7 +209,7 @@ export async function getPeriodicoStats(periodicoId: string) {
   const stats = await db
     .select({
       status: submissoes.status,
-      count: sql<number>`count(*)`.as("count"),
+      count: count(submissoes.id).as("count"),
     })
     .from(submissoes)
     .where(eq(submissoes.periodicoId, periodicoId))
@@ -503,25 +224,285 @@ export async function getPeriodicoStats(periodicoId: string) {
   };
 
   stats.forEach((stat) => {
-    const count = Number(stat.count);
-    result.total += count;
+    const statusCount = Number(stat.count);
+    result.total += statusCount;
 
     switch (stat.status) {
       case "EM_AVALIACAO":
-        result.emAvaliacao = count;
+        result.emAvaliacao = statusCount;
         break;
       case "APROVADO":
-        result.aprovadas = count;
+        result.aprovadas = statusCount;
         break;
       case "REJEITADO":
-        result.rejeitadas = count;
+        result.rejeitadas = statusCount;
         break;
       case "REVISAO_SOLICITADA":
-        result.revisaoSolicitada = count;
+        result.revisaoSolicitada = statusCount;
         break;
     }
   });
 
   return result;
+}
+
+// ============= SUBMISSÕES =============
+
+export async function createSubmissao(data: InsertSubmissao) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.insert(submissoes).values(data);
+  return result;
+}
+
+export async function getAllSubmissoes() {
+  const db = await getDb();
+  if (!db) return [];
+
+  const result = await db
+    .select({
+      submissao: submissoes,
+      criador: users,
+      periodico: periodicos,
+    })
+    .from(submissoes)
+    .leftJoin(users, eq(submissoes.criadorId, users.id))
+    .leftJoin(periodicos, eq(submissoes.periodicoId, periodicos.id))
+    .orderBy(desc(submissoes.dataSubmissao));
+
+  return result;
+}
+
+export async function getSubmissaoById(id: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const submissaoResult = await db
+    .select({
+      submissao: submissoes,
+      criador: users,
+      periodico: periodicos,
+    })
+    .from(submissoes)
+    .leftJoin(users, eq(submissoes.criadorId, users.id))
+    .leftJoin(periodicos, eq(submissoes.periodicoId, periodicos.id))
+    .where(eq(submissoes.id, id))
+    .limit(1);
+
+  if (submissaoResult.length === 0) return undefined;
+
+  const autoresResult = await db
+    .select()
+    .from(autores)
+    .where(eq(autores.submissaoId, id))
+    .orderBy(autores.ordem);
+
+  const revisoesResult = await db
+    .select({
+      revisao: revisoes,
+      revisor: users,
+    })
+    .from(revisoes)
+    .leftJoin(users, eq(revisoes.revisorId, users.id))
+    .where(eq(revisoes.submissaoId, id))
+    .orderBy(desc(revisoes.dataRecebimento));
+
+  const historicoResult = await db
+    .select()
+    .from(historicoStatus)
+    .where(eq(historicoStatus.submissaoId, id))
+    .orderBy(desc(historicoStatus.data));
+
+  return {
+    ...submissaoResult[0],
+    autores: autoresResult,
+    revisoes: revisoesResult,
+    historico: historicoResult,
+  };
+}
+
+export async function getSubmissoesByPeriodico(periodicoId: string) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const result = await db
+    .select({
+      submissao: submissoes,
+      criador: users,
+    })
+    .from(submissoes)
+    .leftJoin(users, eq(submissoes.criadorId, users.id))
+    .where(eq(submissoes.periodicoId, periodicoId))
+    .orderBy(desc(submissoes.dataSubmissao));
+
+  return result;
+}
+
+export async function updateSubmissaoStatus(
+  submissaoId: string,
+  status: "EM_AVALIACAO" | "APROVADO" | "REJEITADO" | "REVISAO_SOLICITADA" | "SUBMETIDO_NOVAMENTE",
+  observacao?: string
+) {
+  const db = await getDb();
+  if (!db) return;
+
+  await db.update(submissoes).set({ status }).where(eq(submissoes.id, submissaoId));
+
+  await db.insert(historicoStatus).values({
+    submissaoId,
+    status,
+    observacao,
+  });
+}
+
+// ============= AUTORES =============
+
+export async function createAutor(data: InsertAutor) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  return await db.insert(autores).values(data);
+}
+
+export async function createAutores(data: InsertAutor[]) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  if (data.length === 0) return;
+  return await db.insert(autores).values(data);
+}
+
+// ============= REVISÕES =============
+
+export async function createRevisao(data: InsertRevisao) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  return await db.insert(revisoes).values(data);
+}
+
+export async function getAllRevisoes() {
+  const db = await getDb();
+  if (!db) return [];
+
+  const result = await db
+    .select({
+      revisao: revisoes,
+      submissao: submissoes,
+      revisor: users,
+    })
+    .from(revisoes)
+    .leftJoin(submissoes, eq(revisoes.submissaoId, submissoes.id))
+    .leftJoin(users, eq(revisoes.revisorId, users.id))
+    .orderBy(desc(revisoes.dataRecebimento));
+
+  return result;
+}
+
+export async function updateRevisaoAnalise(
+  revisaoId: string,
+  analisePercentual: number,
+  sugestoesLLM: string
+) {
+  const db = await getDb();
+  if (!db) return;
+
+  await db
+    .update(revisoes)
+    .set({ analisePercentual, sugestoesLLM })
+    .where(eq(revisoes.id, revisaoId));
+}
+
+// ============= CONFIGURAÇÕES =============
+
+export async function getConfiguracao(userId: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const result = await db.select().from(configuracoes).where(eq(configuracoes.userId, userId)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function upsertConfiguracao(data: InsertConfiguracao) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const existing = await getConfiguracao(data.userId);
+
+  if (existing) {
+    await db.update(configuracoes).set(data).where(eq(configuracoes.userId, data.userId));
+  } else {
+    await db.insert(configuracoes).values(data);
+  }
+}
+
+// ============= DASHBOARD =============
+
+export async function getDashboardStats() {
+  const db = await getDb();
+  if (!db)
+    return {
+      totalSubmissoes: 0,
+      emAvaliacao: 0,
+      aprovadas: 0,
+      rejeitadas: 0,
+      revisaoSolicitada: 0,
+    };
+
+  const stats = await db
+    .select({
+      status: submissoes.status,
+      count: count(submissoes.id).as("count"),
+    })
+    .from(submissoes)
+    .groupBy(submissoes.status);
+
+  const result = {
+    totalSubmissoes: 0,
+    emAvaliacao: 0,
+    aprovadas: 0,
+    rejeitadas: 0,
+    revisaoSolicitada: 0,
+  };
+
+  stats.forEach((stat) => {
+    const statusCount = Number(stat.count);
+    result.totalSubmissoes += statusCount;
+
+    switch (stat.status) {
+      case "EM_AVALIACAO":
+        result.emAvaliacao = statusCount;
+        break;
+      case "APROVADO":
+        result.aprovadas = statusCount;
+        break;
+      case "REJEITADO":
+        result.rejeitadas = statusCount;
+        break;
+      case "REVISAO_SOLICITADA":
+        result.revisaoSolicitada = statusCount;
+        break;
+    }
+  });
+
+  return result;
+}
+
+export async function getRecentSubmissoes(limit: number = 10) {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db
+    .select({
+      submissao: submissoes,
+      criador: users,
+      periodico: periodicos,
+    })
+    .from(submissoes)
+    .leftJoin(users, eq(submissoes.criadorId, users.id))
+    .leftJoin(periodicos, eq(submissoes.periodicoId, periodicos.id))
+    .orderBy(desc(submissoes.dataSubmissao))
+    .limit(limit);
 }
 
