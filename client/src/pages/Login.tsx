@@ -157,16 +157,6 @@ export default function Login() {
                   >
                     {loginMutation.isPending ? "Entrando..." : "Entrar"}
                   </Button>
-
-                  <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
-                    <p className="text-sm text-blue-800 font-medium mb-1">
-                      Credenciais do Administrador:
-                    </p>
-                    <p className="text-xs text-blue-600">
-                      Email: admjulianoo@gmail.com
-                    </p>
-                    <p className="text-xs text-blue-600">Senha: Adm4125</p>
-                  </div>
                 </form>
               </TabsContent>
 

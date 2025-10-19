@@ -1,0 +1,8 @@
+{
+  "query": "ALTER TABLE users \nADD COLUMN universidade VARCHAR(300) AFTER role,\nADD COLUMN areaFormacao VARCHAR(200) AFTER universidade,\nADD COLUMN nivelFormacao ENUM('graduacao', 'mestrado', 'doutorado', 'pos_doutorado') AFTER areaFormacao,\nADD COLUMN universidadeOrigem VARCHAR(300) AFTER nivelFormacao,\nADD COLUMN telefone VARCHAR(20) AFTER universidadeOrigem;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 5Cao4VLNNWnds8M.root --database GSLGX7P8QrpNWMxXy6qPSr --execute ALTER TABLE users \nADD COLUMN universidade VARCHAR(300) AFTER role,\nADD COLUMN areaFormacao VARCHAR(200) AFTER universidade,\nADD COLUMN nivelFormacao ENUM('graduacao', 'mestrado', 'doutorado', 'pos_doutorado') AFTER areaFormacao,\nADD COLUMN universidadeOrigem VARCHAR(300) AFTER nivelFormacao,\nADD COLUMN telefone VARCHAR(20) AFTER universidadeOrigem;",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1054 (42S22) at line 1: Unknown column 'universidade' in 'users'"
+  ]
+}
