@@ -21,3 +21,19 @@ export const getLoginUrl = () => {
 
   return url.toString();
 };
+
+export const STATUS_LABELS: Record<string, string> = {
+  EM_AVALIACAO: "Em Avaliação",
+  APROVADO: "Aprovado",
+  REJEITADO: "Rejeitado",
+  REVISAO_SOLICITADA: "Revisão Solicitada",
+  SUBMETIDO_NOVAMENTE: "Submetido Novamente",
+};
+
+export const STATUS_COLORS: Record<string, string> = {
+  EM_AVALIACAO: "text-yellow-600 bg-yellow-50 border-yellow-200",
+  APROVADO: "text-green-600 bg-green-50 border-green-200",
+  REJEITADO: "text-red-600 bg-red-50 border-red-200",
+  REVISAO_SOLICITADA: "text-blue-600 bg-blue-50 border-blue-200",
+  SUBMETIDO_NOVAMENTE: "text-purple-600 bg-purple-50 border-purple-200",
+};
