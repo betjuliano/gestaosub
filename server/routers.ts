@@ -86,7 +86,7 @@ export const appRouter = router({
   system: systemRouter,
 
   auth: router({
-    me: publicProcedure.query((opts) => opts.ctx.user),
+    me: publicProcedure.query(opts => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
@@ -94,6 +94,65 @@ export const appRouter = router({
         success: true,
       } as const;
     }),
+    
+    login: publicProcedure
+      .input(z.object({
+        email: z.string().email(),
+        senha: z.string().min(1),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const user = await db.loginUser(input.email, input.senha);
+        
+        if (!user) {
+          return { success: false, message: "Email ou senha incorretos" };
+        }
+        
+        // Criar sessão (cookie)
+        const sessionData = {
+          userId: user.id,
+          email: user.email,
+          role: user.role,
+        };
+        
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, JSON.stringify(sessionData), {
+          ...cookieOptions,
+          maxAge: 7 * 24 * 60 * 60 * 1000, // 7 dias
+        });
+        
+        return { success: true, user };
+      }),
+    
+    register: publicProcedure
+      .input(z.object({
+        nome: z.string().min(1),
+        email: z.string().email(),
+        senha: z.string().min(6),
+        universidade: z.string().min(1),
+        areaFormacao: z.string().min(1),
+        nivelFormacao: z.enum(["graduacao", "mestrado", "doutorado", "pos-doutorado"]),
+        telefone: z.string().min(1),
+      }))
+      .mutation(async ({ input }) => {
+        // Verificar se email já existe
+        const existingUser = await db.getUserByEmail(input.email);
+        if (existingUser) {
+          return { success: false, message: "Email já cadastrado" };
+        }
+        
+        // Criar usuário
+        const userId = await db.createUser({
+          nome: input.nome,
+          email: input.email,
+          senha: input.senha,
+          universidade: input.universidade,
+          areaFormacao: input.areaFormacao,
+          nivelFormacao: input.nivelFormacao,
+          telefone: input.telefone,
+        });
+        
+        return { success: true, userId };
+      }),
   }),
 
   // ============= USUÁRIOS =============

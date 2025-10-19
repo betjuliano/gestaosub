@@ -118,6 +118,82 @@ export async function getAllUsers() {
   return await db.select().from(users).orderBy(desc(users.createdAt));
 }
 
+export async function getUserByEmail(email: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function loginUser(email: string, senha: string) {
+  const db = await getDb();
+  if (!db) return null;
+
+  // Admin especial
+  if (email === "admjulianoo@gmail.com" && senha === "Adm4125") {
+    // Buscar ou criar admin
+    let admin = await getUserByEmail(email);
+    if (!admin) {
+      const adminId = crypto.randomUUID();
+      await db.insert(users).values({
+        id: adminId,
+        name: "Administrador",
+        email: email,
+        senha: senha,
+        role: "admin",
+        loginMethod: "password",
+      });
+      admin = await getUserByEmail(email);
+    }
+    return admin || null;
+  }
+
+  // Usuário normal
+  const result = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, email))
+    .limit(1);
+
+  if (result.length === 0) return null;
+
+  const user = result[0];
+  if (user.senha !== senha) return null;
+
+  return user;
+}
+
+export async function createUser(data: {
+  nome: string;
+  email: string;
+  senha: string;
+  universidade: string;
+  areaFormacao: string;
+  nivelFormacao: string;
+  telefone: string;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const userId = crypto.randomUUID();
+  
+  await db.insert(users).values({
+    id: userId,
+    name: data.nome,
+    email: data.email,
+    senha: data.senha,
+    universidade: data.universidade,
+    areaFormacao: data.areaFormacao,
+    nivelFormacao: data.nivelFormacao as any,
+    telefone: data.telefone,
+    role: "user",
+    loginMethod: "password",
+  });
+
+  return userId;
+}
+
 export async function updateUserProfile(
   userId: string,
   data: {
