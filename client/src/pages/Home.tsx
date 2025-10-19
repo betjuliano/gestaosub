@@ -36,6 +36,7 @@ export default function Home() {
   const { data: submissoesRecentes, isLoading: submissoesLoading } =
     trpc.dashboard.submissoesRecentes.useQuery(10);
   const { data: periodicosMaisUtilizados } = trpc.dashboard.periodicosMaisUtilizados.useQuery(5);
+  const { data: alertas, isLoading: alertasLoading } = trpc.alertas.list.useQuery();
 
   if (loading || statsLoading) {
     return (
@@ -301,16 +302,136 @@ export default function Home() {
             <Card className="bg-white">
               <CardHeader>
                 <CardTitle>Alertas de Prazo</CardTitle>
-                <CardDescription>Submissões com prazos próximos do vencimento</CardDescription>
+                <CardDescription>Submissões e revisões com prazos próximos do vencimento</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="text-center py-12">
-                  <AlertCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                  <p className="text-gray-500">Funcionalidade em desenvolvimento</p>
-                </div>
+                {alertasLoading ? (
+                  <div className="text-center py-8">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+                  </div>
+                ) : alertas && (alertas.submissoes.length > 0 || alertas.revisoes.length > 0) ? (
+                  <div className="space-y-6">
+                    {alertas.submissoes.length > 0 && (
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                          <FileText className="w-4 h-4" />
+                          Submissões com Prazo Próximo
+                        </h3>
+                        <div className="space-y-3">
+                          {alertas.submissoes.map((item: any) => {
+                            const diasRestantes = Math.ceil(
+                              (new Date(item.dataPrazo!).getTime() - new Date().getTime()) /
+                                (1000 * 60 * 60 * 24)
+                            );
+                            const isUrgente = diasRestantes <= 3;
+                            return (
+                              <Link
+                                key={item.id}
+                                href={`/submissoes/${item.id}`}
+                                className="block"
+                              >
+                                <div className={`p-4 rounded-lg border-2 hover:shadow-md transition-shadow ${
+                                  isUrgente
+                                    ? "border-red-200 bg-red-50"
+                                    : "border-yellow-200 bg-yellow-50"
+                                }`}>
+                                  <div className="flex items-start justify-between">
+                                    <div className="flex-1">
+                                      <h4 className="font-medium text-gray-900">{item.titulo}</h4>
+                                      <div className="flex items-center gap-2 mt-2">
+                                        <Clock className={`w-4 h-4 ${
+                                          isUrgente ? "text-red-600" : "text-yellow-600"
+                                        }`} />
+                                        <span className={`text-sm font-medium ${
+                                          isUrgente ? "text-red-600" : "text-yellow-600"
+                                        }`}>
+                                          {diasRestantes === 0
+                                            ? "Vence hoje!"
+                                            : diasRestantes === 1
+                                            ? "Vence amanhã"
+                                            : `${diasRestantes} dias restantes`}
+                                        </span>
+                                        <span className="text-xs text-gray-500">
+                                          • Prazo: {new Date(item.dataPrazo!).toLocaleDateString("pt-BR")}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {alertas.revisoes.length > 0 && (
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4" />
+                          Revisões com Prazo Próximo
+                        </h3>
+                        <div className="space-y-3">
+                          {alertas.revisoes.map((item: any) => {
+                            const diasRestantes = Math.ceil(
+                              (new Date(item.dataPrazo!).getTime() - new Date().getTime()) /
+                                (1000 * 60 * 60 * 24)
+                            );
+                            const isUrgente = diasRestantes <= 3;
+                            return (
+                              <div
+                                key={item.id}
+                                className={`p-4 rounded-lg border-2 ${
+                                  isUrgente
+                                    ? "border-red-200 bg-red-50"
+                                    : "border-yellow-200 bg-yellow-50"
+                                }`}
+                              >
+                                <div className="flex items-start justify-between">
+                                  <div className="flex-1">
+                                    <h4 className="font-medium text-gray-900">
+                                      Revisão - {item.numeroRevisores} revisor(es)
+                                    </h4>
+                                    <div className="flex items-center gap-2 mt-2">
+                                      <Clock className={`w-4 h-4 ${
+                                        isUrgente ? "text-red-600" : "text-yellow-600"
+                                      }`} />
+                                      <span className={`text-sm font-medium ${
+                                        isUrgente ? "text-red-600" : "text-yellow-600"
+                                      }`}>
+                                        {diasRestantes === 0
+                                          ? "Vence hoje!"
+                                          : diasRestantes === 1
+                                          ? "Vence amanhã"
+                                          : `${diasRestantes} dias restantes`}
+                                      </span>
+                                      <span className="text-xs text-gray-500">
+                                        • Prazo: {new Date(item.dataPrazo!).toLocaleDateString("pt-BR")}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-12">
+                    <CheckCircle className="w-16 h-16 text-green-300 mx-auto mb-4" />
+                    <p className="text-gray-700 font-medium">Tudo dentro do prazo!</p>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Não há submissões ou revisões com prazos próximos do vencimento
+                    </p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
+
+
         </Tabs>
       </main>
 
