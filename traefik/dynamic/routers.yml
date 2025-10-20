@@ -1,0 +1,91 @@
+# Dynamic Router Configuration
+http:
+  routers:
+    # Dashboard Router (Admin)
+    dashboard:
+      rule: "Host(`traefik.${DOMAIN}`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))"
+      entryPoints:
+        - websecure
+      service: api@internal
+      middlewares:
+        - admin-chain@file
+      tls:
+        certResolver: letsencrypt
+        options: default
+
+    # Main Application Router (catch-all for main domain)
+    main-app:
+      rule: "Host(`${DOMAIN}`)"
+      entryPoints:
+        - websecure
+      service: gestaosub@docker
+      middlewares:
+        - public-chain@file
+      tls:
+        certResolver: letsencrypt
+        options: default
+      priority: 1
+
+    # Health Check Router (Public, no auth)
+    health-check:
+      rule: "Host(`${DOMAIN}`) && Path(`/health`)"
+      entryPoints:
+        - websecure
+      service: gestaosub@docker
+      middlewares:
+        - security-headers@file
+        - rate-limit@file
+      tls:
+        certResolver: letsencrypt
+        options: default
+
+    # API Router (with API rate limiting)
+    api-routes:
+      rule: "Host(`${DOMAIN}`) && PathPrefix(`/api`)"
+      entryPoints:
+        - websecure
+      service: gestaosub@docker
+      middlewares:
+        - api-chain@file
+      tls:
+        certResolver: letsencrypt
+        options: default
+
+    # Static Assets Router (with caching)
+    static-assets:
+      rule: "Host(`${DOMAIN}`) && PathPrefix(`/assets`, `/favicon.ico`, `/robots.txt`, `/sitemap.xml`)"
+      entryPoints:
+        - websecure
+      service: gestaosub@docker
+      middlewares:
+        - security-headers@file
+        - compression@file
+        - cache-headers@file
+      tls:
+        certResolver: letsencrypt
+        options: default
+
+    # Upload Router (with strict rate limiting)
+    upload-routes:
+      rule: "Host(`${DOMAIN}`) && PathPrefix(`/api/upload`)"
+      entryPoints:
+        - websecure
+      service: gestaosub@docker
+      middlewares:
+        - security-headers@file
+        - upload-rate-limit@file
+        - cors@file
+      tls:
+        certResolver: letsencrypt
+        options: default
+
+  middlewares:
+    # Cache Headers for Static Assets
+    cache-headers:
+      headers:
+        customResponseHeaders:
+          Cache-Control: "public, max-age=31536000, immutable"
+          Expires: "Thu, 31 Dec 2037 23:55:55 GMT"
+
+  # Additional services can be defined here if needed
+  services: {}

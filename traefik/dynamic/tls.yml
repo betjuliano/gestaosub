@@ -1,0 +1,60 @@
+# TLS Configuration
+tls:
+  options:
+    default:
+      sslStrategies:
+        - "tls.SniStrict"
+      minVersion: "VersionTLS12"
+      maxVersion: "VersionTLS13"
+      cipherSuites:
+        # TLS 1.3 cipher suites (preferred)
+        - "TLS_AES_256_GCM_SHA384"
+        - "TLS_CHACHA20_POLY1305_SHA256"
+        - "TLS_AES_128_GCM_SHA256"
+        # TLS 1.2 cipher suites (fallback)
+        - "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384"
+        - "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"
+        - "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305"
+        - "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305"
+        - "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256"
+        - "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"
+      curvePreferences:
+        - "X25519"
+        - "CurveP256"
+        - "CurveP384"
+        - "CurveP521"
+      sniStrict: true
+      alpnProtocols:
+        - "h2"
+        - "http/1.1"
+    
+    # Modern TLS configuration (more restrictive)
+    modern:
+      minVersion: "VersionTLS13"
+      maxVersion: "VersionTLS13"
+      cipherSuites:
+        - "TLS_AES_256_GCM_SHA384"
+        - "TLS_CHACHA20_POLY1305_SHA256"
+        - "TLS_AES_128_GCM_SHA256"
+      curvePreferences:
+        - "X25519"
+        - "CurveP256"
+      sniStrict: true
+      alpnProtocols:
+        - "h2"
+        - "http/1.1"
+
+# Certificate stores and additional TLS configuration
+certificates:
+  # You can add manual certificates here if needed
+  # - certFile: /certs/example.com.crt
+  #   keyFile: /certs/example.com.key
+  #   stores:
+  #     - default
+
+stores:
+  default:
+    defaultCertificate:
+      # Fallback certificate (optional)
+      # certFile: /certs/default.crt
+      # keyFile: /certs/default.key

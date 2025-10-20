@@ -13,6 +13,7 @@ build/
 .env.development.local
 .env.test.local
 .env.production.local
+.env.production
 
 # IDE and editor files
 .vscode/
@@ -105,3 +106,26 @@ temp/
 *.db
 *.sqlite
 *.sqlite3
+
+# Docker secrets and sensitive files
+secrets/
+!secrets/.gitkeep
+!secrets/README.md
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+
+# SSL certificates
+certs/
+!certs/.gitkeep
+
+# Backup files
+backups/
+*.backup
+*.bak
+
+# Production configuration with sensitive data
+.env.production
+docker-compose.override.yml

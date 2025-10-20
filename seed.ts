@@ -1,10 +1,14 @@
-import { drizzle } from "drizzle-orm/mysql2";
 import { periodicos, submissoes, autores, revisoes } from "./drizzle/schema";
-
-const db = drizzle(process.env.DATABASE_URL!);
+import { getDb } from "./server/db";
 
 async function seed() {
   console.log("🌱 Iniciando seed...");
+
+  const db = await getDb();
+  if (!db) {
+    console.error("❌ Database not available");
+    return;
+  }
 
   // Criar periódicos
   const periodicoIds = [];

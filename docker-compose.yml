@@ -1,0 +1,193 @@
+version: '3.8'
+
+services:
+  # Traefik Proxy Service
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"  # Dashboard (should be secured in production)
+    networks:
+      - web
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+      - traefik-certs:/certs
+      - traefik-logs:/var/log/traefik
+    environment:
+      - TRAEFIK_API_DASHBOARD=true
+      - TRAEFIK_API_INSECURE=false
+      - ACME_EMAIL=${ACME_EMAIL}
+      - DOMAIN=${DOMAIN}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=web"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.${DOMAIN}`)"
+      - "traefik.http.routers.traefik.entrypoints=websecure"
+      - "traefik.http.routers.traefik.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik.service=api@internal"
+      - "traefik.http.routers.traefik.middlewares=admin-chain@file"
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # PostgreSQL Database Service
+  db:
+    image: postgres:16-alpine
+    container_name: gestaosub-db
+    restart: unless-stopped
+    networks:
+      - internal
+    environment:
+      - POSTGRES_DB=${DB_NAME:-gestaosub}
+      - POSTGRES_USER=${DB_USER:-gestaosub_user}
+      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    secrets:
+      - db_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-gestaosub_user} -d ${DB_NAME:-gestaosub}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # GestãoSub Application Service
+  app:
+    image: gestaosub:latest
+    container_name: gestaosub-app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    networks:
+      - web
+      - internal
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://${DB_USER:-gestaosub_user}:${DB_PASSWORD}@db:5432/${DB_NAME:-gestaosub}?sslmode=prefer
+      - APP_URL=https://${DOMAIN}
+      - JWT_SECRET_FILE=/run/secrets/jwt_secret
+      - COOKIE_DOMAIN=${DOMAIN}
+      - COOKIE_SECURE=true
+      - CORS_ORIGIN=https://${DOMAIN}
+      - PORT=3000
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - ENABLE_REQUEST_LOGGING=${ENABLE_REQUEST_LOGGING:-true}
+      - RATE_LIMIT_WINDOW_MS=${RATE_LIMIT_WINDOW_MS:-900000}
+      - RATE_LIMIT_MAX_REQUESTS=${RATE_LIMIT_MAX_REQUESTS:-100}
+      # AWS S3 Configuration (optional)
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_S3_BUCKET=${AWS_S3_BUCKET}
+    secrets:
+      - jwt_secret
+      - cookie_secret
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    labels:
+      # Traefik configuration
+      - "traefik.enable=true"
+      - "traefik.docker.network=gestaosub_web"
+      
+      # HTTP Router
+      - "traefik.http.routers.gestaosub.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.gestaosub.entrypoints=websecure"
+      - "traefik.http.routers.gestaosub.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.gestaosub.service=gestaosub"
+      
+      # Service configuration
+      - "traefik.http.services.gestaosub.loadbalancer.server.port=3000"
+      - "traefik.http.services.gestaosub.loadbalancer.healthcheck.path=/health"
+      - "traefik.http.services.gestaosub.loadbalancer.healthcheck.interval=30s"
+      - "traefik.http.services.gestaosub.loadbalancer.healthcheck.timeout=5s"
+      
+      # Security middleware
+      - "traefik.http.middlewares.gestaosub-security.headers.customrequestheaders.X-Forwarded-Proto=https"
+      - "traefik.http.middlewares.gestaosub-security.headers.sslredirect=true"
+      - "traefik.http.middlewares.gestaosub-security.headers.stsincludesubdomains=true"
+      - "traefik.http.middlewares.gestaosub-security.headers.stspreload=true"
+      - "traefik.http.middlewares.gestaosub-security.headers.stsseconds=31536000"
+      - "traefik.http.middlewares.gestaosub-security.headers.forcestsheader=true"
+      - "traefik.http.middlewares.gestaosub-security.headers.framedeny=true"
+      - "traefik.http.middlewares.gestaosub-security.headers.contenttypenosniff=true"
+      - "traefik.http.middlewares.gestaosub-security.headers.browserxssfilter=true"
+      - "traefik.http.middlewares.gestaosub-security.headers.referrerpolicy=strict-origin-when-cross-origin"
+      - "traefik.http.middlewares.gestaosub-security.headers.permissionspolicy=camera=(), microphone=(), geolocation=()"
+      
+      # Rate limiting middleware
+      - "traefik.http.middlewares.gestaosub-ratelimit.ratelimit.average=100"
+      - "traefik.http.middlewares.gestaosub-ratelimit.ratelimit.period=1m"
+      - "traefik.http.middlewares.gestaosub-ratelimit.ratelimit.burst=50"
+      
+      # Apply middleware chain
+      - "traefik.http.routers.gestaosub.middlewares=public-chain@file"
+
+# Network Configuration
+networks:
+  # External network for Traefik (shared with other services)
+  web:
+    external: true
+    name: web
+  # Internal network for app-database communication
+  internal:
+    driver: bridge
+    internal: true
+
+# Persistent Volumes
+volumes:
+  # PostgreSQL data persistence
+  postgres_data:
+    driver: local
+  # Traefik certificates storage
+  traefik-certs:
+    driver: local
+  # Traefik logs storage
+  traefik-logs:
+    driver: local
+  # Application logs (optional)
+  app-logs:
+    driver: local
+
+# Docker Secrets for sensitive data
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  jwt_secret:
+    file: ./secrets/jwt_secret.txt
+  cookie_secret:
+    file: ./secrets/cookie_secret.txt

@@ -1,0 +1,44 @@
+# Monitoring and Metrics Configuration
+http:
+  routers:
+    # Prometheus Metrics Router (Admin only)
+    metrics:
+      rule: "Host(`traefik.${DOMAIN}`) && Path(`/metrics`)"
+      entryPoints:
+        - websecure
+      service: prometheus@internal
+      middlewares:
+        - admin-auth@file
+        - admin-whitelist@file
+      tls:
+        certResolver: letsencrypt
+
+    # Ping/Health Router (Public)
+    ping:
+      rule: "Host(`traefik.${DOMAIN}`) && Path(`/ping`)"
+      entryPoints:
+        - websecure
+      service: ping@internal
+      middlewares:
+        - security-headers@file
+      tls:
+        certResolver: letsencrypt
+
+  middlewares:
+    # Monitoring specific middleware
+    monitoring-headers:
+      headers:
+        customResponseHeaders:
+          Cache-Control: "no-cache, no-store, must-revalidate"
+          Pragma: "no-cache"
+          Expires: "0"
+
+# TCP routers for non-HTTP services (if needed)
+tcp:
+  routers: {}
+  services: {}
+
+# UDP routers (if needed)
+udp:
+  routers: {}
+  services: {}

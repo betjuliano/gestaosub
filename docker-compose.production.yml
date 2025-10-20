@@ -1,0 +1,216 @@
+version: '3.8'
+
+services:
+  traefik:
+    image: traefik:v3.0
+    container_name: gestaosub-traefik
+    restart: unless-stopped
+    networks:
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"  # Dashboard (should be secured)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik:/etc/traefik:ro
+      - ./certs:/certs
+    environment:
+      - TRAEFIK_API_DASHBOARD=true
+      - TRAEFIK_API_INSECURE=false
+      - TRAEFIK_ENTRYPOINTS_WEB_ADDRESS=:80
+      - TRAEFIK_ENTRYPOINTS_WEBSECURE_ADDRESS=:443
+      - TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_EMAIL=${ACME_EMAIL}
+      - TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_STORAGE=/certs/acme.json
+      - TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_HTTPCHALLENGE_ENTRYPOINT=web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.${DOMAIN}`)"
+      - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.dashboard.middlewares=auth"
+      - "traefik.http.middlewares.auth.basicauth.users=${TRAEFIK_AUTH_USERS}"
+      # Global redirect to HTTPS
+      - "traefik.http.routers.http-catchall.rule=hostregexp(`{host:.+}`)"
+      - "traefik.http.routers.http-catchall.entrypoints=web"
+      - "traefik.http.routers.http-catchall.middlewares=redirect-to-https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+
+  app:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: gestaosub-app
+    restart: unless-stopped
+    networks:
+      - web
+      - internal
+    environment:
+      # Application Configuration
+      - NODE_ENV=production
+      - PORT=3000
+      - APP_URL=https://${DOMAIN}
+      
+      # Database Configuration
+      - DATABASE_URL=postgresql://gestaosub_user:${DB_PASSWORD}@db:5432/gestaosub?sslmode=require&connect_timeout=10
+      - DB_POOL_SIZE=20
+      - DB_POOL_MIN=5
+      - DB_POOL_IDLE_TIMEOUT=30000
+      - DB_CONNECT_TIMEOUT=10000
+      - DB_SSL=require
+      
+      # Security Configuration
+      - CORS_ORIGIN=https://${DOMAIN}
+      - CORS_CREDENTIALS=true
+      - ENABLE_SECURITY_HEADERS=true
+      - ENABLE_COMPRESSION=true
+      
+      # Rate Limiting
+      - RATE_LIMIT_WINDOW_MS=900000
+      - RATE_LIMIT_MAX_REQUESTS=100
+      - API_RATE_LIMIT_WINDOW_MS=60000
+      - API_RATE_LIMIT_MAX_REQUESTS=30
+      
+      # Security Headers
+      - HSTS_MAX_AGE=31536000
+      - HSTS_INCLUDE_SUBDOMAINS=true
+      - HSTS_PRELOAD=true
+      
+      # Logging
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+      - ENABLE_REQUEST_LOGGING=true
+      - ENABLE_ERROR_LOGGING=true
+      
+      # Performance
+      - NODE_OPTIONS=--max-old-space-size=2048
+      - UV_THREADPOOL_SIZE=16
+      
+      # Optional Services (configure as needed)
+      - STORAGE_TYPE=s3
+      - AWS_REGION=us-east-1
+      - AWS_S3_BUCKET=${AWS_S3_BUCKET:-}
+      - SMTP_PORT=587
+      - SMTP_SECURE=true
+      - SMTP_FROM=noreply@${DOMAIN}
+      - LLM_PROVIDER=openai
+    
+    secrets:
+      - db_password
+      - jwt_secret
+      - cookie_secret
+      - aws_access_key_id
+      - aws_secret_access_key
+      - smtp_user
+      - smtp_pass
+      - google_client_secret
+      - openai_api_key
+      - anthropic_api_key
+    
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.app.entrypoints=websecure"
+      - "traefik.http.routers.app.tls.certresolver=letsencrypt"
+      
+      # Security middleware
+      - "traefik.http.middlewares.security-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
+      - "traefik.http.middlewares.security-headers.headers.sslredirect=true"
+      - "traefik.http.middlewares.security-headers.headers.stsSeconds=31536000"
+      - "traefik.http.middlewares.security-headers.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.security-headers.headers.stsPreload=true"
+      - "traefik.http.middlewares.security-headers.headers.forceSTSHeader=true"
+      - "traefik.http.middlewares.security-headers.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.security-headers.headers.browserXssFilter=true"
+      - "traefik.http.middlewares.security-headers.headers.referrerPolicy=strict-origin-when-cross-origin"
+      - "traefik.http.middlewares.security-headers.headers.frameDeny=true"
+      
+      # Rate limiting at proxy level
+      - "traefik.http.middlewares.rate-limit.ratelimit.average=100"
+      - "traefik.http.middlewares.rate-limit.ratelimit.period=1m"
+      - "traefik.http.middlewares.rate-limit.ratelimit.burst=50"
+      
+      # Apply middlewares
+      - "traefik.http.routers.app.middlewares=security-headers,rate-limit"
+      
+      # Service configuration
+      - "traefik.http.services.app.loadbalancer.server.port=3000"
+    
+    depends_on:
+      - db
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  db:
+    image: postgres:16-alpine
+    container_name: gestaosub-db
+    restart: unless-stopped
+    networks:
+      - internal
+    environment:
+      - POSTGRES_DB=gestaosub
+      - POSTGRES_USER=gestaosub_user
+      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
+      - POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    secrets:
+      - db_password
+    
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gestaosub_user -d gestaosub"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Security: Run as non-root user
+    user: postgres
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+networks:
+  web:
+    external: true
+  internal:
+    driver: bridge
+    internal: true
+
+volumes:
+  postgres_data:
+    driver: local
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  jwt_secret:
+    file: ./secrets/jwt_secret.txt
+  cookie_secret:
+    file: ./secrets/cookie_secret.txt
+  aws_access_key_id:
+    file: ./secrets/aws_access_key_id.txt
+  aws_secret_access_key:
+    file: ./secrets/aws_secret_access_key.txt
+  smtp_user:
+    file: ./secrets/smtp_user.txt
+  smtp_pass:
+    file: ./secrets/smtp_pass.txt
+  google_client_secret:
+    file: ./secrets/google_client_secret.txt
+  openai_api_key:
+    file: ./secrets/openai_api_key.txt
+  anthropic_api_key:
+    file: ./secrets/anthropic_api_key.txt

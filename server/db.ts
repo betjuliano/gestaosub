@@ -1,6 +1,7 @@
 import { eq, desc, like, or, sql, and, count, lt, gte } from "drizzle-orm";
 import bcrypt from "bcryptjs";
-import { drizzle } from "drizzle-orm/mysql2";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import {
   InsertUser,
   users,
@@ -20,16 +21,60 @@ import {
   InsertConfiguracao,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { logger, measurePerformance } from "./_core/logger";
+import { 
+  validateAndSanitizeEmail, 
+  validatePassword, 
+  validateSchema,
+  createUserSchema,
+  loginSchema,
+  updateUserProfileSchema,
+  CreateUserInput,
+  LoginInput,
+  UpdateUserProfileInput
+} from "./_core/validation";
+import { 
+  userCache, 
+  periodicoCache, 
+  statsCache, 
+  clearUserCache, 
+  clearPeriodicoCache, 
+  clearStatsCache 
+} from "./_core/cache";
 
 let _db: ReturnType<typeof drizzle> | null = null;
+let _client: postgres.Sql | null = null;
 
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      // Optimized PostgreSQL connection for production
+      const connectionOptions = {
+        max: parseInt(process.env.DB_POOL_SIZE || "20"),
+        idle_timeout: parseInt(process.env.DB_POOL_IDLE_TIMEOUT || "30"),
+        connect_timeout: parseInt(process.env.DB_CONNECT_TIMEOUT || "10"),
+        ssl: process.env.DB_SSL === "require" ? "require" : process.env.DB_SSL === "prefer" ? "prefer" : false,
+        prepare: false, // Disable prepared statements for better compatibility
+        transform: {
+          undefined: null, // Transform undefined to null for PostgreSQL
+        },
+      };
+
+      _client = postgres(process.env.DATABASE_URL, connectionOptions);
+      _db = drizzle(_client);
+      
+      // Test connection
+      await _client`SELECT 1`;
+      logger.database("PostgreSQL connection established successfully", {
+        poolSize: connectionOptions.max,
+        ssl: connectionOptions.ssl,
+      });
     } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
+      logger.database("Failed to connect to PostgreSQL", {
+        databaseUrl: process.env.DATABASE_URL ? "***configured***" : "missing",
+      }, error as Error);
       _db = null;
+      _client = null;
     }
   }
   return _db;
@@ -44,11 +89,11 @@ export async function upsertUser(user: InsertUser): Promise<void> {
 
   const db = await getDb();
   if (!db) {
-    console.warn("[Database] Cannot upsert user: database not available");
+    logger.warn("Cannot upsert user: database not available", { userId: user.id });
     return;
   }
 
-  try {
+  return measurePerformance("upsertUser", async () => {
     const values: InsertUser = { id: user.id };
     const updateSet: Record<string, unknown> = {};
 
@@ -98,18 +143,23 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     await db.insert(users).values(values).onDuplicateKeyUpdate({
       set: updateSet,
     });
-  } catch (error) {
-    console.error("[Database] Failed to upsert user:", error);
-    throw error;
-  }
+    
+    logger.database("User upserted successfully", { userId: user.id });
+  }, { userId: user.id });
 }
 
 export async function getUser(id: string) {
-  const db = await getDb();
-  if (!db) return undefined;
+  const cacheKey = `user:${id}`;
+  
+  return userCache.getOrSet(cacheKey, async () => {
+    const db = await getDb();
+    if (!db) return undefined;
 
-  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
-  return result.length > 0 ? result[0] : undefined;
+    return measurePerformance("getUser", async () => {
+      const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+      return result.length > 0 ? result[0] : undefined;
+    }, { userId: id });
+  }, 60000); // Cache por 1 minuto
 }
 
 export async function getAllUsers() {
@@ -120,24 +170,48 @@ export async function getAllUsers() {
 }
 
 export async function getUserByEmail(email: string) {
-  const db = await getDb();
-  if (!db) return undefined;
+  const cacheKey = `user:email:${email}`;
+  
+  return userCache.getOrSet(cacheKey, async () => {
+    const db = await getDb();
+    if (!db) return undefined;
 
-  const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
-  return result.length > 0 ? result[0] : undefined;
+    return measurePerformance("getUserByEmail", async () => {
+      const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
+      return result.length > 0 ? result[0] : undefined;
+    }, { email });
+  }, 60000); // Cache por 1 minuto
 }
 
 export async function loginUser(email: string, senha: string) {
-  const db = await getDb();
-  if (!db) return null;
+  // Validar inputs
+  try {
+    validateAndSanitizeEmail(email);
+    if (!senha || senha.length < 1) {
+      throw new Error("Senha é obrigatória");
+    }
+  } catch (error) {
+    logger.auth("Login failed - invalid input", { email }, error as Error);
+    return null;
+  }
 
-  // Admin especial
-  if (email === "admjulianoo@gmail.com" && senha === "Adm4125") {
+  const db = await getDb();
+  if (!db) {
+    logger.warn("Cannot login user: database not available", { email });
+    return null;
+  }
+
+  return measurePerformance("loginUser", async () => {
+    // Admin especial - usar variáveis de ambiente para segurança
+    const adminEmail = process.env.ADMIN_EMAIL;
+    const adminPassword = process.env.ADMIN_PASSWORD;
+    
+    if (adminEmail && adminPassword && email === adminEmail && senha === adminPassword) {
     // Buscar ou criar admin
     let admin = await getUserByEmail(email);
     if (!admin) {
       const adminId = crypto.randomUUID();
-      const hashedPassword = await bcrypt.hash("Adm4125", 10);
+      const hashedPassword = await bcrypt.hash(adminPassword, 12); // Aumentar rounds para segurança
       await db.insert(users).values({
         id: adminId,
         name: "Administrador",
@@ -148,64 +222,95 @@ export async function loginUser(email: string, senha: string) {
       });
       admin = await getUserByEmail(email);
     }
-    // Verificar senha com bcrypt
-    if (admin && admin.senha) {
-      const isValid = await bcrypt.compare(senha, admin.senha);
-      if (!isValid) return null;
+      // Verificar senha com bcrypt
+      if (admin && admin.senha) {
+        const isValid = await bcrypt.compare(senha, admin.senha);
+        if (!isValid) {
+          logger.security("Admin login failed - invalid password", { email });
+          return null;
+        }
+      }
+      logger.auth("Admin login successful", { email, userId: admin?.id });
+      return admin || null;
     }
-    return admin || null;
-  }
 
-  // Usuário normal
-  const result = await db
-    .select()
-    .from(users)
-    .where(eq(users.email, email))
-    .limit(1);
+    // Usuário normal
+    const result = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, email))
+      .limit(1);
 
-  if (result.length === 0) return null;
+    if (result.length === 0) {
+      logger.auth("Login failed - user not found", { email });
+      return null;
+    }
 
-  const user = result[0];
-  if (!user.senha) return null;
-  
-  // Verificar senha com bcrypt
-  const isValid = await bcrypt.compare(senha, user.senha);
-  if (!isValid) return null;
+    const user = result[0];
+    if (!user.senha) {
+      logger.auth("Login failed - no password set", { email, userId: user.id });
+      return null;
+    }
+    
+    // Verificar senha com bcrypt
+    const isValid = await bcrypt.compare(senha, user.senha);
+    if (!isValid) {
+      logger.security("Login failed - invalid password", { email, userId: user.id });
+      return null;
+    }
 
-  return user;
+    logger.auth("User login successful", { email, userId: user.id });
+    return user;
+  }, { email });
 }
 
-export async function createUser(data: {
-  nome: string;
-  email: string;
-  senha: string;
-  universidade: string;
-  areaFormacao: string;
-  nivelFormacao: string;
-  telefone: string;
-}) {
+export async function createUser(data: CreateUserInput) {
+  // Validar dados de entrada
+  const validatedData = validateSchema(createUserSchema)(data);
+  
   const db = await getDb();
-  if (!db) throw new Error("Database not available");
+  if (!db) {
+    logger.error("Cannot create user: database not available");
+    throw new Error("Database not available");
+  }
 
-  const userId = crypto.randomUUID();
-  
-  // Criptografar senha com bcrypt
-  const hashedPassword = await bcrypt.hash(data.senha, 10);
-  
-  await db.insert(users).values({
-    id: userId,
-    name: data.nome,
-    email: data.email,
-    senha: hashedPassword,
-    universidade: data.universidade,
-    areaFormacao: data.areaFormacao,
-    nivelFormacao: data.nivelFormacao as any,
-    telefone: data.telefone,
-    role: "user",
-    loginMethod: "password",
-  });
+  return measurePerformance("createUser", async () => {
+    // Verificar se email já existe
+    const existingUser = await getUserByEmail(validatedData.email);
+    if (existingUser) {
+      logger.auth("User creation failed - email already exists", { email: validatedData.email });
+      throw new Error("Email já está em uso");
+    }
 
-  return userId;
+    const userId = crypto.randomUUID();
+    
+    // Criptografar senha com bcrypt (12 rounds para segurança)
+    const hashedPassword = await bcrypt.hash(validatedData.senha, 12);
+    
+    await db.insert(users).values({
+      id: userId,
+      name: validatedData.nome,
+      email: validatedData.email,
+      senha: hashedPassword,
+      universidade: validatedData.universidade,
+      areaFormacao: validatedData.areaFormacao,
+      nivelFormacao: validatedData.nivelFormacao,
+      telefone: validatedData.telefone,
+      role: "user",
+      loginMethod: "password",
+    });
+
+    // Invalidar cache relacionado
+    clearUserCache(userId);
+
+    logger.auth("User created successfully", { 
+      email: validatedData.email, 
+      userId,
+      universidade: validatedData.universidade 
+    });
+    
+    return userId;
+  }, { email: validatedData.email });
 }
 
 export async function updateUserProfile(
@@ -223,6 +328,11 @@ export async function updateUserProfile(
   if (!db) return;
 
   await db.update(users).set(data).where(eq(users.id, userId));
+  
+  // Invalidar cache do usuário
+  clearUserCache(userId);
+  
+  logger.database("User profile updated", { userId });
 }
 
 // ============= PERIÓDICOS =============
@@ -232,22 +342,40 @@ export async function createPeriodico(data: InsertPeriodico) {
   if (!db) throw new Error("Database not available");
 
   const result = await db.insert(periodicos).values(data);
+  
+  // Invalidar cache de periódicos
+  clearPeriodicoCache('all');
+  
+  logger.database("Periodico created", { periodicoId: data.id });
+  
   return result;
 }
 
 export async function getAllPeriodicos() {
-  const db = await getDb();
-  if (!db) return [];
+  const cacheKey = 'periodicos:all';
+  
+  return periodicoCache.getOrSet(cacheKey, async () => {
+    const db = await getDb();
+    if (!db) return [];
 
-  return await db.select().from(periodicos).orderBy(periodicos.nome);
+    return measurePerformance("getAllPeriodicos", async () => {
+      return await db.select().from(periodicos).orderBy(periodicos.nome);
+    });
+  }, 1800000); // Cache por 30 minutos
 }
 
 export async function getPeriodicoById(id: string) {
-  const db = await getDb();
-  if (!db) return undefined;
+  const cacheKey = `periodico:${id}`;
+  
+  return periodicoCache.getOrSet(cacheKey, async () => {
+    const db = await getDb();
+    if (!db) return undefined;
 
-  const result = await db.select().from(periodicos).where(eq(periodicos.id, id)).limit(1);
-  return result.length > 0 ? result[0] : undefined;
+    return measurePerformance("getPeriodicoById", async () => {
+      const result = await db.select().from(periodicos).where(eq(periodicos.id, id)).limit(1);
+      return result.length > 0 ? result[0] : undefined;
+    }, { periodicoId: id });
+  }, 1800000); // Cache por 30 minutos
 }
 
 export async function searchPeriodicos(query: string) {
@@ -343,6 +471,16 @@ export async function createSubmissao(data: InsertSubmissao) {
   if (!db) throw new Error("Database not available");
 
   const result = await db.insert(submissoes).values(data);
+  
+  // Invalidar caches relacionados
+  clearStatsCache();
+  
+  logger.database("Submissao created", { 
+    submissaoId: data.id, 
+    criadorId: data.criadorId,
+    periodicoId: data.periodicoId 
+  });
+  
   return result;
 }
 
@@ -443,6 +581,15 @@ export async function updateSubmissaoStatus(
     submissaoId,
     status,
     observacao,
+  });
+  
+  // Invalidar caches relacionados
+  clearStatsCache();
+  
+  logger.database("Submissao status updated", { 
+    submissaoId, 
+    newStatus: status,
+    observacao 
   });
 }
 
@@ -630,53 +777,59 @@ export async function upsertConfiguracao(data: InsertConfiguracao) {
 // ============= DASHBOARD =============
 
 export async function getDashboardStats() {
-  const db = await getDb();
-  if (!db)
-    return {
-      totalSubmissoes: 0,
-      emAvaliacao: 0,
-      aprovadas: 0,
-      rejeitadas: 0,
-      revisaoSolicitada: 0,
-    };
+  const cacheKey = 'dashboard:stats';
+  
+  return statsCache.getOrSet(cacheKey, async () => {
+    const db = await getDb();
+    if (!db)
+      return {
+        totalSubmissoes: 0,
+        emAvaliacao: 0,
+        aprovadas: 0,
+        rejeitadas: 0,
+        revisaoSolicitada: 0,
+      };
 
-  const stats = await db
-    .select({
-      status: submissoes.status,
-      count: count(submissoes.id).as("count"),
-    })
-    .from(submissoes)
-    .groupBy(submissoes.status);
+    return measurePerformance("getDashboardStats", async () => {
+      const stats = await db
+        .select({
+          status: submissoes.status,
+          count: count(submissoes.id).as("count"),
+        })
+        .from(submissoes)
+        .groupBy(submissoes.status);
 
-  const result = {
-    totalSubmissoes: 0,
-    emAvaliacao: 0,
-    aprovadas: 0,
-    rejeitadas: 0,
-    revisaoSolicitada: 0,
-  };
+      const result = {
+        totalSubmissoes: 0,
+        emAvaliacao: 0,
+        aprovadas: 0,
+        rejeitadas: 0,
+        revisaoSolicitada: 0,
+      };
 
-  stats.forEach((stat) => {
-    const statusCount = Number(stat.count);
-    result.totalSubmissoes += statusCount;
+      stats.forEach((stat) => {
+        const statusCount = Number(stat.count);
+        result.totalSubmissoes += statusCount;
 
-    switch (stat.status) {
-      case "EM_AVALIACAO":
-        result.emAvaliacao = statusCount;
-        break;
-      case "APROVADO":
-        result.aprovadas = statusCount;
-        break;
-      case "REJEITADO":
-        result.rejeitadas = statusCount;
-        break;
-      case "REVISAO_SOLICITADA":
-        result.revisaoSolicitada = statusCount;
-        break;
-    }
-  });
+        switch (stat.status) {
+          case "EM_AVALIACAO":
+            result.emAvaliacao = statusCount;
+            break;
+          case "APROVADO":
+            result.aprovadas = statusCount;
+            break;
+          case "REJEITADO":
+            result.rejeitadas = statusCount;
+            break;
+          case "REVISAO_SOLICITADA":
+            result.revisaoSolicitada = statusCount;
+            break;
+        }
+      });
 
-  return result;
+      return result;
+    });
+  }, 600000); // Cache por 10 minutos
 }
 
 export async function getRecentSubmissoes(limit: number = 10) {

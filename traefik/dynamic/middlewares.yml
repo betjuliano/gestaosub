@@ -1,0 +1,193 @@
+# Global Middlewares Configuration
+http:
+  middlewares:
+    # Enhanced Security Headers Middleware
+    security-headers:
+      headers:
+        accessControlAllowMethods:
+          - GET
+          - OPTIONS
+          - PUT
+          - POST
+          - DELETE
+          - PATCH
+        accessControlMaxAge: 86400
+        hostsProxyHeaders:
+          - "X-Forwarded-Host"
+          - "X-Forwarded-Proto"
+          - "X-Forwarded-For"
+        referrerPolicy: "strict-origin-when-cross-origin"
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        forceSTSHeader: true
+        frameDeny: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        customRequestHeaders:
+          X-Forwarded-Proto: "https"
+          X-Real-IP: ""
+        customResponseHeaders:
+          X-Robots-Tag: "none,noarchive,nosnippet,notranslate,noimageindex"
+          X-Content-Type-Options: "nosniff"
+          X-Frame-Options: "DENY"
+          X-XSS-Protection: "1; mode=block"
+          Referrer-Policy: "strict-origin-when-cross-origin"
+          Permissions-Policy: "camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()"
+          Content-Security-Policy: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none';"
+          Server: ""
+        isDevelopment: false
+
+    # General Rate Limiting Middleware
+    rate-limit:
+      rateLimit:
+        average: 100
+        period: "1m"
+        burst: 50
+        sourceCriterion:
+          ipStrategy:
+            depth: 2
+            excludedIPs:
+              - "127.0.0.1/32"
+              - "10.0.0.0/8"
+              - "172.16.0.0/12"
+              - "192.168.0.0/16"
+
+    # API Rate Limiting (more restrictive)
+    api-rate-limit:
+      rateLimit:
+        average: 30
+        period: "1m"
+        burst: 10
+        sourceCriterion:
+          ipStrategy:
+            depth: 2
+
+    # Strict Rate Limiting for sensitive endpoints
+    strict-rate-limit:
+      rateLimit:
+        average: 10
+        period: "1m"
+        burst: 5
+        sourceCriterion:
+          ipStrategy:
+            depth: 2
+
+    # Upload Rate Limiting
+    upload-rate-limit:
+      rateLimit:
+        average: 5
+        period: "1m"
+        burst: 2
+        sourceCriterion:
+          ipStrategy:
+            depth: 2
+
+    # Enhanced Compression Middleware
+    compression:
+      compress:
+        excludedContentTypes:
+          - "text/event-stream"
+          - "application/grpc"
+        minResponseBodyBytes: 1024
+
+    # Error Pages Middleware
+    error-pages:
+      errors:
+        status:
+          - "400-599"
+        service: error-pages-service
+        query: "/{status}.html"
+
+    # Basic Auth for Admin Areas
+    admin-auth:
+      basicAuth:
+        users:
+          - "admin:$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi"  # Default: admin/secret (CHANGE IN PRODUCTION)
+        realm: "Traefik Dashboard"
+        removeHeader: true
+
+    # Enhanced HTTPS Redirect
+    https-redirect:
+      redirectScheme:
+        scheme: https
+        permanent: true
+        port: "443"
+
+    # Security Chain for Public Routes
+    public-chain:
+      chain:
+        middlewares:
+          - security-headers
+          - compression
+          - rate-limit
+
+    # Security Chain for API Routes
+    api-chain:
+      chain:
+        middlewares:
+          - security-headers
+          - compression
+          - api-rate-limit
+          - cors
+
+    # Security Chain for Admin Routes
+    admin-chain:
+      chain:
+        middlewares:
+          - security-headers
+          - admin-auth
+          - admin-whitelist
+          - strict-rate-limit
+
+    # CORS Middleware
+    cors:
+      headers:
+        accessControlAllowOriginList:
+          - "https://gestaodeartigos.iaprojetos.com.br"
+        accessControlAllowMethods:
+          - "GET"
+          - "POST"
+          - "PUT"
+          - "DELETE"
+          - "OPTIONS"
+        accessControlAllowHeaders:
+          - "Content-Type"
+          - "Authorization"
+          - "X-Requested-With"
+          - "Accept"
+          - "Origin"
+        accessControlExposeHeaders:
+          - "Content-Length"
+          - "X-Total-Count"
+        accessControlMaxAge: 86400
+        addVaryHeader: true
+
+    # IP Whitelist for Admin (optional)
+    admin-whitelist:
+      ipWhiteList:
+        sourceRange:
+          - "127.0.0.1/32"
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+          - "192.168.0.0/16"
+
+    # Maintenance Mode Middleware
+    maintenance:
+      errors:
+        status:
+          - "503"
+        service: maintenance-service
+        query: "/maintenance.html"
+
+  # Services for error pages and maintenance
+  services:
+    error-pages-service:
+      loadBalancer:
+        servers:
+          - url: "http://error-pages:8080"
+    
+    maintenance-service:
+      loadBalancer:
+        servers:
+          - url: "http://maintenance:8080"

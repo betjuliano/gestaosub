@@ -1,0 +1,115 @@
+# Traefik Static Configuration
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+# API and Dashboard configuration
+api:
+  dashboard: true
+  debug: false
+  insecure: false
+
+# Entry Points
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entrypoint:
+          to: websecure
+          scheme: https
+          permanent: true
+      middlewares:
+        - security-headers@file
+        - rate-limit@file
+  websecure:
+    address: ":443"
+    http:
+      tls:
+        options: default
+      middlewares:
+        - security-headers@file
+        - compression@file
+
+# Certificate Resolvers
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: ${ACME_EMAIL}
+      storage: /certs/acme.json
+      keyType: EC256
+      httpChallenge:
+        entryPoint: web
+      # Use DNS challenge for wildcard certificates (optional)
+      # dnsChallenge:
+      #   provider: cloudflare
+      #   resolvers:
+      #     - "1.1.1.1:53"
+      #     - "8.8.8.8:53"
+  # Staging resolver for testing
+  letsencrypt-staging:
+    acme:
+      email: ${ACME_EMAIL}
+      storage: /certs/acme-staging.json
+      keyType: EC256
+      caServer: https://acme-staging-v02.api.letsencrypt.org/directory
+      httpChallenge:
+        entryPoint: web
+
+# Providers
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: web
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+# Logging
+log:
+  level: INFO
+  format: json
+  filePath: "/var/log/traefik/traefik.log"
+
+accessLog:
+  format: json
+  filePath: "/var/log/traefik/access.log"
+  bufferingSize: 100
+  fields:
+    defaultMode: keep
+    names:
+      ClientUsername: drop
+    headers:
+      defaultMode: keep
+      names:
+        User-Agent: redact
+        Authorization: drop
+        Content-Type: keep
+        X-Forwarded-For: keep
+        X-Real-IP: keep
+
+# Metrics
+metrics:
+  prometheus:
+    addEntryPointsLabels: true
+    addServicesLabels: true
+    addRoutersLabels: true
+    buckets:
+      - 0.1
+      - 0.3
+      - 1.2
+      - 5.0
+
+# Global HTTP configuration
+serversTransport:
+  insecureSkipVerify: false
+  maxIdleConnsPerHost: 42
+  forwardingTimeouts:
+    dialTimeout: 30s
+    responseHeaderTimeout: 0s
+    idleConnTimeout: 90s
+
+# Pilot configuration (optional)
+pilot:
+  dashboard: false
